@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "coak.omaloom",
+  "name": "Omaloom",
+  "version": "0.1.0",
+  "author": "Cause of a Kind",
+  "license": "MIT",
+  "description": "Local-first screen recording controls for Omarchy Quattro.",
+  "kinds": [
+    "service",
+    "panel",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "qml/Service.qml",
+    "panel": "qml/Panel.qml",
+    "barWidget": "qml/BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Omaloom",
+    "description": "Start and stop local screen recordings.",
+    "category": "Capture",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
