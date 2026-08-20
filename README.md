@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/omaloom-icon.png" alt="Omaloom logo" width="132" height="132">
+  <img src="assets/omaloom-clapperboard.png" alt="Omaloom logo" width="132" height="132">
 </p>
 
 <h1 align="center">Omaloom</h1>
