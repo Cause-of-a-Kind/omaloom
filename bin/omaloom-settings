@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """Safe persistence helper for Omaloom QML settings.
 
 The QML side calls this helper with an argv list (never through a shell).  This

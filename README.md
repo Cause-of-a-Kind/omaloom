@@ -49,8 +49,16 @@ omarchy plugin enable coak.omaloom --section right
 Restart the shell after QML changes to avoid stale loaded components:
 
 ```bash
-omarchy-restart-shell
+omarchy restart shell
 ```
+
+## Uninstall
+
+```bash
+omarchy plugin remove coak.omaloom
+```
+
+Omaloom keeps user preferences in `~/.config/omaloom/settings.json` and recordings in the selected output folder. Plugin removal intentionally leaves both in place. Remove `~/.config/omaloom` manually if you also want to discard the saved preferences; recordings are never deleted by Omaloom.
 
 ## Usage workflow
 
@@ -99,8 +107,9 @@ Omaloom saves local MP4 files only. It does not implement cloud upload, Dropbox/
 
 ## Requirements
 
-Omaloom is designed for Omarchy Quattro/Quickshell on Wayland and expects the same capture tools Omarchy uses, including:
+Omaloom is designed for Omarchy Quattro/Quickshell on Wayland. Stock Omarchy supplies system Python 3 and the capture stack; Omaloom uses only Python's standard library and does not require `pip` packages. Expected tools include:
 
+- `/usr/bin/python3`
 - `gpu-screen-recorder`
 - `omarchy-capture-region`, `omarchy-capture-webcam-list`, `omarchy-capture-webcam-resize`
 - `hyprctl`, `jq`
@@ -157,7 +166,7 @@ Install and validate a local copy:
 rsync -a --delete ./ ~/.config/omarchy/plugins/coak.omaloom/
 qmllint ~/.config/omarchy/plugins/coak.omaloom/qml/*.qml
 omarchy plugin validate ~/.config/omarchy/plugins/coak.omaloom
-omarchy-restart-shell
+omarchy restart shell
 omarchy-shell shell ping
 ```
 

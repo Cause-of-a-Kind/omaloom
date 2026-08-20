@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """Portal-isolated output folder picker for Omaloom.
 
 Uses xdg-desktop-portal's FileChooser portal instead of an in-process Qt/GTK
