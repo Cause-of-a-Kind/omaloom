@@ -54,24 +54,24 @@ Must have:
 Confirmed through milestone 2:
 
 - Source selection before recording for non-fullscreen capture.
-- Visible 5-second countdown after source and webcam preparation.
+- Region guide immediately after source selection, followed by webcam preparation and visible 5-second countdown.
 - Persistent output folder and capture settings.
 - Portal-backed output folder selection.
 - Microphone and webcam device selectors.
 - Setup-only live microphone waveform and webcam preview.
 - Region-aware webcam overlay placement.
 - Click-through, outside-only region recording guide.
+- Compact scrollable library list scanned from the selected output folder, with Open/Reveal/Copy path actions per MP4.
 - `REC` indicator that does not reopen setup controls.
 - Stop through Omarchy's top-center recording control.
 
 Remaining must-have work:
 
-- Show/copy/open/reveal the saved recording path.
 - Clean install verification and publication documentation.
 
 Nice but optional for v1:
 
-- Recent recording list from a simple JSON file.
+- Cross-folder recording history/index.
 - Thumbnails.
 - Filename pattern customization.
 
@@ -91,8 +91,9 @@ Not v1:
 Quattro plugin
 ├── qml/Service.qml       # owns settings + recording state machine
 ├── qml/Panel.qml         # controls and saved-file actions
-├── qml/BarWidget.qml     # compact bar indicator
-└── bin/omaloom-recorder  # shell wrapper around `omarchy screenrecord`
+├── qml/BarWidget.qml       # compact bar indicator and saved-file workflow
+├── bin/omaloom-recorder    # wrapper around Omarchy/gpu-screen-recorder
+└── bin/omaloom-recordings  # local saved MP4 listing/actions
 ```
 
 QML must not do media encoding. The recorder backend is replaceable.

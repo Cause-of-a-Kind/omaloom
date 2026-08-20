@@ -9,6 +9,7 @@ coak.omaloom
 ├── bin/omaloom-settings      # atomic JSON persistence helper
 ├── bin/omaloom-folder-picker # isolated xdg-desktop-portal folder picker
 ├── bin/omaloom-geometry      # region/monitor guide mapping
+├── bin/omaloom-recordings    # saved MP4 listing/open/reveal/copy actions
 ├── bin/omaloom-devices       # capture device discovery and setup mic meter
 └── qml/
     ├── OmaloomSettings.qml    # shared settings bridge
@@ -37,10 +38,11 @@ Internally, `start` now uses a local two-phase flow copied from Omarchy's public
 1. Select the capture target first:
    - fullscreen/current-monitor: focused monitor, no interaction
    - non-fullscreen: `omarchy-capture-region smart --match-monitor`
-2. Release setup-only device previews and prepare/place the recording webcam overlay when enabled.
-3. Emit a 5-second countdown after the source and webcam overlay are ready.
-4. Emit `starting`, allowing Quickshell to unmap the countdown popup.
-5. Launch `gpu-screen-recorder` with Omarchy-compatible arguments, state files, and indicator refresh.
+2. Emit `source_selected`; for region targets this includes guide geometry immediately.
+3. Release setup-only device previews and prepare/place the recording webcam overlay when enabled.
+4. Emit a 5-second countdown after the source and webcam overlay are ready.
+5. Emit `starting`, allowing Quickshell to unmap the countdown popup.
+6. Launch `gpu-screen-recorder` with Omarchy-compatible arguments, state files, and indicator refresh.
 
 `stop` intentionally delegates back to Omarchy:
 
@@ -53,10 +55,10 @@ That preserves Omarchy's SIGINT save behavior, webcam cleanup, MP4 finalization,
 Output is newline-delimited JSON-ish events for QML parsing, for example:
 
 ```json
-{"event":"source_selected","target":"region:1280x720+0+0"}
+{"event":"source_selected","target":"region:1280x720+0+0","guide":{"type":"region","region":{"x":0,"y":0,"width":1280,"height":720},"monitors":[{"name":"DP-1","x":0,"y":0,"width":2560,"height":1440,"scale":1}]}}
 {"event":"countdown","seconds":"5"}
 {"event":"starting"}
-{"event":"recording_started","path":"/home/user/Videos/Omaloom/screenrecording.mp4","guide":{"type":"region","region":{"x":100,"y":100,"width":800,"height":450},"monitors":[{"name":"DP-1","x":0,"y":0,"width":2560,"height":1440,"scale":1}]}}
+{"event":"recording_started","path":"/home/user/Videos/Omaloom/screenrecording.mp4"}
 {"event":"saved","path":"/home/user/Videos/Omaloom/screenrecording.mp4"}
 {"event":"status","state":"recording"}
 {"event":"cancelled"}
@@ -87,11 +89,19 @@ The webcam setup preview uses installed `QtMultimedia` (`MediaDevices`, `Camera`
 
 ## Region recording guide
 
-Region captures emit guide geometry only with `recording_started`, never at `source_selected`, so the guide appears only when the backend has actually started recording. Fullscreen/current-monitor targets do not emit guide data and therefore never show the overlay.
+Region captures emit guide geometry with `source_selected`, immediately after the slurp/Omarchy selection succeeds. The guide appears before webcam overlay preparation, stays visible while the overlay is moved to the selected region's bottom-right, remains through the 5–1 countdown, and continues during recording. Fullscreen/current-monitor targets do not emit guide data and therefore never show the overlay.
 
 `bin/omaloom-geometry` maps the global logical `region:WxH+X+Y` target from Omarchy/slurp onto intersecting Hyprland monitors, preserving negative coordinates and monitor scale metadata. `qml/OmaloomRegionGuide.qml` creates click-through `PanelWindow` layer-shell surfaces for the relevant `Quickshell.screens`, then converts global logical monitor coordinates into each screen's local coordinate space.
 
 The guide draws only outside the captured rectangle: subtle shading in the four outside bands plus one-pixel/thin accent strips just beyond each region edge. If a selected edge lies on a physical monitor edge, that side is omitted rather than drawn inward. The window `mask` is empty (`Region {}`), making the guide noninteractive/click-through. The owning bar widget hides the guide on saved/idle/error/cancel, before a new start, and on plugin destruction. If recording is stopped by Omarchy's top-center control, Omaloom removes the guide on the next status transition to idle.
+
+## Saved recordings
+
+Saved-file workflow is intentionally folder-scanned. `bin/omaloom-recordings list --directory DIR --limit 0` validates and scans only the selected output folder, returning all regular `.mp4` files sorted by modification time descending with inexpensive metadata (`path`, `name`, `modified`, `size`). Positive limits remain supported for scripts; `0` means unlimited. There is no history database, thumbnail generation, deletion, cloud upload, or media probing.
+
+The bar widget refreshes recordings when the idle setup popup opens, when `outputDirectory` changes, and shortly after recording transitions to saved/idle so Omarchy has time to finalize the MP4. Its normal desktop presentation is a larger centered two-column dashboard: RECORD/setup controls and live preview remain visible in the left column with the full-width Start button anchored at the bottom, while LIBRARY contains one compact scrollable list of all MP4 recordings with per-row Open/Reveal/Copy actions. Narrow popup widths switch to explicit Record/Library tabs, defaulting to Record on each open. Only the library `ListView` scrolls; the whole popup no longer scrolls. While `recording`, `selecting`, `countdown`, or `starting`, saved-file controls are hidden and disabled; `REC` remains an indicator only.
+
+Open, Reveal, and Copy path actions are delegated to `bin/omaloom-recordings` with argv-only `Process` calls. The helper requires an existing regular `.mp4` path. Open uses the desktop opener, Reveal prefers `org.freedesktop.FileManager1.ShowItems` with opening the parent folder as fallback, and Copy path writes the exact absolute path to `wl-copy`. Failures return structured JSON on stderr and become inline nonfatal feedback in the popup.
 
 ## State and update model
 

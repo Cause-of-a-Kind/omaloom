@@ -19,7 +19,7 @@
   },
   "barWidget": {
     "displayName": "Omaloom",
-    "description": "Start and stop local screen recordings.",
+    "description": "Open the Omaloom recording dashboard and local MP4 library.",
     "category": "Capture",
     "allowMultiple": false,
     "defaultSection": "right"

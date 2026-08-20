@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import QtMultimedia
@@ -15,13 +16,15 @@ Panel {
   readonly property string recorder: home + "/.config/omarchy/plugins/coak.omaloom/bin/omaloom-recorder"
   readonly property string devicesHelper: home + "/.config/omarchy/plugins/coak.omaloom/bin/omaloom-devices"
   readonly property string folderPicker: home + "/.config/omarchy/plugins/coak.omaloom/bin/omaloom-folder-picker"
+  readonly property string recordingsHelper: home + "/.config/omarchy/plugins/coak.omaloom/bin/omaloom-recordings"
   // Elm-ish model: state is owned by backend observations. The backend owns
   // source selection, then countdown, then gpu-screen-recorder startup.
   readonly property bool selecting: state === "selecting"
+  readonly property bool preparing: state === "preparing"
   readonly property bool countdown: state === "countdown"
   readonly property bool starting: state === "starting"
   readonly property bool recording: state === "recording"
-  readonly property bool busy: selecting || countdown || starting || recording
+  readonly property bool busy: selecting || preparing || countdown || starting || recording
   readonly property bool canStart: !startDelay.running && !actionProcess.running && !busy
   readonly property bool setupResourcesActive: root.opened && !root.busy && root.state !== "error"
   readonly property bool previewActive: setupResourcesActive && omaloomSettings.recordWebcam && mediaDevices.videoInputs.length > 0
@@ -46,6 +49,14 @@ Panel {
   property var currentGuide: null
   property bool reopenAfterFolderPicker: false
   property bool meterRestartPending: false
+  property var previewOutputTarget: null
+  property var recordings: []
+  property bool recordingsLoading: false
+  property string recordingsError: ""
+  property string actionFeedback: ""
+  property bool actionFeedbackError: false
+  property string dashboardTab: "record"
+  property string pendingRecordingAction: ""
 
   function refresh() {
     if (statusProcess.running) return
@@ -95,7 +106,7 @@ Panel {
     hideRegionGuide()
     pendingStartArgs = args
     countdownRemaining = 5
-    state = omaloomSettings.recordFullscreen ? "starting" : "selecting"
+    state = omaloomSettings.recordFullscreen ? "preparing" : "selecting"
     // Close first and launch on a short timer so the popup has a frame to
     // unmap before slurp/source selection begins. The backend owns the real
     // sequence: source selection, then countdown, then gpu-screen-recorder.
@@ -131,6 +142,50 @@ Panel {
     } else {
       hideRegionGuide()
     }
+  }
+
+  function formatBytes(size) {
+    var n = Number(size || 0)
+    if (n >= 1073741824) return (n / 1073741824).toFixed(1) + " GB"
+    if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB"
+    if (n >= 1024) return Math.round(n / 1024) + " KB"
+    return n + " B"
+  }
+
+  function formatModified(seconds) {
+    var d = new Date(Number(seconds || 0) * 1000)
+    if (isNaN(d.getTime())) return ""
+    return d.toLocaleString(Qt.locale(), Locale.ShortFormat)
+  }
+
+  function recordingMeta(item) {
+    if (!item) return ""
+    return formatModified(item.modified) + " · " + formatBytes(item.size)
+  }
+
+  function refreshRecordings() {
+    if (recordingsProcess.running || busy) return
+    recordingsLoading = true
+    recordingsError = ""
+    recordingsProcess.command = [recordingsHelper, "list", "--directory", omaloomSettings.outputDirectory, "--limit", "0"]
+    recordingsProcess.running = true
+  }
+
+  function runRecordingAction(action, path) {
+    if (recordingActionProcess.running || busy || recordingsLoading || !path) return
+    actionFeedback = ""
+    actionFeedbackError = false
+    recordingsError = ""
+    pendingRecordingAction = action
+    recordingActionProcess.command = [recordingsHelper, action, path]
+    recordingActionProcess.running = true
+  }
+
+  function actionLabel(action) {
+    if (action === "copy-path") return "Copied path"
+    if (action === "reveal") return "Revealing recording"
+    if (action === "open") return "Opening recording"
+    return "Done"
   }
 
   function refreshDevices() {
@@ -221,8 +276,9 @@ Panel {
     lastMessage = text
 
     if (text.indexOf('"source_selected"') !== -1) {
-      state = "starting"
+      state = "preparing"
       countdownRemaining = 5
+      maybeShowRegionGuide(event)
       lastMessage = omaloomSettings.recordWebcam ? "Preparing webcam overlay…" : "Preparing recording…"
       root.open()
       startTimeout.restart()
@@ -240,7 +296,6 @@ Panel {
       state = "recording"
       var startedPath = extractJsonString(text, "path")
       lastMessage = startedPath ? "Recording: " + startedPath : "Recording…"
-      maybeShowRegionGuide(event)
     } else if (text.indexOf('"cancelled"') !== -1) {
       state = "idle"
       hideRegionGuide()
@@ -250,12 +305,13 @@ Panel {
       hideRegionGuide()
       state = "saved"
       lastMessage = lastSavedPath ? "Saved: " + lastSavedPath : "Recording saved."
+      recordingsRefreshDelay.restart()
     } else if (text.indexOf('"state":"recording"') !== -1) {
       state = "recording"
       var activePath = extractJsonString(text, "path")
       lastMessage = activePath ? "Recording: " + activePath : "Recording…"
     } else if (text.indexOf('"state":"idle"') !== -1) {
-      if (state === "selecting" || state === "countdown" || state === "starting") {
+      if (state === "selecting" || state === "preparing" || state === "countdown" || state === "starting") {
         // During source selection/countdown gpu-screen-recorder does not exist
         // yet. Keep the UI in its local state until it becomes recording,
         // cancelled, or the timeout resets.
@@ -265,6 +321,7 @@ Panel {
         hideRegionGuide()
         state = "idle"
         lastMessage = "Recording stopped. Ready to record locally."
+        recordingsRefreshDelay.restart()
       } else if (state !== "saved") {
         hideRegionGuide()
         state = "idle"
@@ -285,6 +342,8 @@ Panel {
     if (opened) {
       refreshDevices()
       restartMeterForSelectedDevice()
+      dashboardTab = "record"
+      if (!busy) refreshRecordings()
     } else {
       microphoneLevel = 0
       microphoneListOpen = false
@@ -305,6 +364,11 @@ Panel {
     id: omaloomSettings
     onRecordMicrophoneChanged: root.updateMeter()
     onMicrophoneDeviceChanged: root.restartMeterForSelectedDevice()
+    onOutputDirectoryChanged: {
+      root.recordings = []
+      root.recordingsError = ""
+      if (root.opened && !root.busy) root.refreshRecordings()
+    }
   }
 
   MediaDevices { id: mediaDevices }
@@ -324,7 +388,7 @@ Panel {
         }
         CaptureSession {
           camera: previewCamera
-          videoOutput: previewOutput
+          videoOutput: root.previewOutputTarget
         }
       }
     }
@@ -346,6 +410,13 @@ Panel {
     repeat: true
     running: true
     onTriggered: root.refresh()
+  }
+
+  Timer {
+    id: recordingsRefreshDelay
+    interval: 1400
+    repeat: false
+    onTriggered: if (root.opened && !root.busy) root.refreshRecordings()
   }
 
   Timer {
@@ -384,7 +455,7 @@ Panel {
     interval: 30000
     repeat: false
     onTriggered: {
-      if (root.state === "selecting" || root.state === "countdown" || root.state === "starting") {
+      if (root.state === "selecting" || root.state === "preparing" || root.state === "countdown" || root.state === "starting") {
         root.hideRegionGuide()
         root.state = "idle"
         root.lastMessage = "Recording was not started. Ready to record locally."
@@ -407,6 +478,65 @@ Panel {
     }
     stderr: SplitParser { onRead: function(line) { console.warn("Omaloom folder picker failed:", String(line)) } }
     onExited: function() { reopenAfterPickerDelay.restart() }
+  }
+
+  Process {
+    id: recordingsProcess
+    stdout: SplitParser {
+      onRead: function(line) {
+        try {
+          var payload = JSON.parse(String(line || "{}"))
+          root.recordings = Array.isArray(payload.recordings) ? payload.recordings : []
+          root.recordingsError = ""
+        } catch (e) {
+          root.recordings = []
+          root.recordingsError = "Could not read recordings."
+        }
+      }
+    }
+    stderr: SplitParser {
+      onRead: function(line) {
+        try { root.recordingsError = JSON.parse(String(line || "{}")).error || String(line) }
+        catch (e) { root.recordingsError = String(line) }
+      }
+    }
+    onExited: function(exitCode) {
+      root.recordingsLoading = false
+      if (exitCode !== 0 && root.recordingsError === "") root.recordingsError = "Could not read recordings."
+    }
+  }
+
+  Process {
+    id: recordingActionProcess
+    stdout: SplitParser {
+      onRead: function(line) {
+        try {
+          var payload = JSON.parse(String(line || "{}"))
+          if (payload.ok === true) {
+            root.actionFeedback = root.actionLabel(payload.action || root.pendingRecordingAction)
+            root.actionFeedbackError = false
+          }
+        } catch (e) {
+          root.actionFeedback = "Done"
+          root.actionFeedbackError = false
+        }
+      }
+    }
+    stderr: SplitParser {
+      onRead: function(line) {
+        root.actionFeedbackError = true
+        try { root.actionFeedback = JSON.parse(String(line || "{}")).error || String(line) }
+        catch (e) { root.actionFeedback = String(line) }
+      }
+    }
+    onExited: function(exitCode) {
+      if (exitCode !== 0 && root.actionFeedback === "") {
+        root.actionFeedback = "Recording action failed."
+        root.actionFeedbackError = true
+      }
+      root.pendingRecordingAction = ""
+      if (root.opened && !root.busy) root.refreshRecordings()
+    }
   }
 
   Process {
@@ -482,12 +612,13 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.countdown ? String(root.countdownRemaining) : (root.recording ? "REC" : "Omaloom")
-    active: root.recording || root.countdown
-    tooltipText: root.recording ? "Recording — use the Omarchy stop button at the top center" : (root.countdown ? "Recording starts in " + root.countdownRemaining : (root.selecting ? "Select a source/region" : (root.starting ? "Starting recording…" : "Open Omaloom")))
+    text: root.countdown ? String(root.countdownRemaining) : (root.starting ? "GO" : (root.recording ? "REC" : "󰿎"))
+    fontSize: (!root.countdown && !root.starting && !root.recording) ? Style.font.title : Style.font.body
+    active: root.recording || root.countdown || root.starting
+    tooltipText: root.recording ? "Recording — use the Omarchy stop button at the top center" : (root.countdown ? "Recording starts in " + root.countdownRemaining : (root.selecting ? "Select a source/region" : (root.preparing ? "Preparing recording…" : (root.starting ? "Starting recording…" : "Open Omaloom"))))
     labelVisible: !(root.bar && root.bar.vertical === true)
     hasVisualContent: true
-    horizontalMargin: 8.75
+    horizontalMargin: (!root.countdown && !root.starting && !root.recording) ? 7.25 : 8.75
     verticalPadding: 8.75
 
     onPressed: function(mouseButton) { root.triggerPress(mouseButton) }
@@ -495,10 +626,10 @@ Panel {
     Text {
       visible: root.bar && root.bar.vertical === true
       anchors.centerIn: parent
-      text: root.countdown ? String(root.countdownRemaining) : (root.recording ? "●" : "◌")
+      text: root.countdown ? String(root.countdownRemaining) : (root.starting ? "▶" : (root.recording ? "●" : "󰿎"))
       color: root.recording ? Color.urgent : button.foreground
       font.family: button.fontFamily
-      font.pixelSize: button.fontSize
+      font.pixelSize: (!root.countdown && !root.starting && !root.recording) ? button.fontSize * 1.12 : button.fontSize
     }
   }
 
@@ -509,247 +640,523 @@ Panel {
     bar: root.bar
     open: root.opened
     centerOnBar: true
-    contentWidth: popup.fittedContentWidth(Style.space(460))
-    contentHeight: popup.fittedContentHeight(panelColumn.implicitHeight, Style.space(560))
+    readonly property bool narrowDashboard: contentWidth < Style.space(760)
 
-    Column {
-      id: panelColumn
-      width: parent.width
-      spacing: Style.space(10)
+    contentWidth: popup.fittedContentWidth(root.countdown ? Style.space(460) : Style.space(920))
+    contentHeight: popup.fittedContentHeight(root.countdown ? Style.space(360) : Style.space(640), Style.space(700))
 
-      Text {
-        text: "Omaloom"
-        color: root.contentForeground
-        font.family: root.contentFontFamily
-        font.pixelSize: Style.font.title
-        font.bold: true
-      }
+    Item {
+      id: dashboardRoot
+      anchors.fill: parent
 
-      Text {
-        text: root.countdown ? "Recording starts in" : (root.recording ? "Recording" : (root.starting ? "Starting…" : "Ready"))
-        color: root.contentForeground
-        font.family: root.contentFontFamily
-        font.pixelSize: Style.font.body
-      }
-
-      Text {
+      Column {
+        id: countdownPane
         visible: root.countdown
+        anchors.centerIn: parent
         width: parent.width
-        text: String(root.countdownRemaining)
-        color: Color.accent
-        font.family: root.contentFontFamily
-        font.pixelSize: Style.space(96)
-        font.bold: true
-        horizontalAlignment: Text.AlignHCenter
-      }
+        spacing: Style.space(14)
 
-      SelectorRow {
-        visible: !root.countdown
-        height: visible ? implicitHeight : 0
-        width: parent.width
-        label: "Folder"
-        value: omaloomSettings.outputDirectory
-        enabled: root.canStart
-        onActivated: root.openFolderPicker()
-      }
-
-      ToggleRow {
-        visible: !root.countdown
-        height: visible ? implicitHeight : 0
-        width: parent.width
-        label: "Current monitor / fullscreen"
-        checked: omaloomSettings.recordFullscreen
-        enabled: root.canStart
-        onToggled: function(checked) { omaloomSettings.recordFullscreen = checked }
-      }
-
-      ToggleRow {
-        visible: !root.countdown
-        height: visible ? implicitHeight : 0
-        width: parent.width
-        label: "System audio"
-        checked: omaloomSettings.recordSystemAudio
-        enabled: root.canStart
-        onToggled: function(checked) { omaloomSettings.recordSystemAudio = checked }
-      }
-
-      ToggleRow {
-        visible: !root.countdown
-        height: visible ? implicitHeight : 0
-        width: parent.width
-        label: "Microphone"
-        checked: omaloomSettings.recordMicrophone
-        enabled: root.canStart
-        onToggled: function(checked) { omaloomSettings.recordMicrophone = checked }
-      }
-
-      SelectorRow {
-        visible: !root.countdown && omaloomSettings.recordMicrophone
-        height: visible ? implicitHeight : 0
-        width: parent.width
-        label: "Mic input"
-        value: root.microphoneDevices.length === 0 ? "No microphones found" : root.deviceLabel(root.microphoneDevices, omaloomSettings.microphoneDevice || "default_input", "Default microphone")
-        enabled: root.canStart && root.microphoneDevices.length > 0
-        onActivated: root.microphoneListOpen = !root.microphoneListOpen
-      }
-
-      Repeater {
-        model: (!root.countdown && omaloomSettings.recordMicrophone && root.microphoneListOpen) ? root.microphoneDevices : []
-        DeviceChoiceRow {
-          width: panelColumn.width
-          label: modelData.label || modelData.id
-          selected: (omaloomSettings.microphoneDevice || "default_input") === modelData.id
-          enabled: root.canStart
-          onActivated: {
-            omaloomSettings.microphoneDevice = modelData.id
-            root.microphoneListOpen = false
-          }
-        }
-      }
-
-      ToggleRow {
-        visible: !root.countdown
-        height: visible ? implicitHeight : 0
-        width: parent.width
-        label: "Webcam overlay"
-        checked: omaloomSettings.recordWebcam
-        enabled: root.canStart
-        onToggled: function(checked) { omaloomSettings.recordWebcam = checked }
-      }
-
-      SelectorRow {
-        visible: !root.countdown && omaloomSettings.recordWebcam
-        height: visible ? implicitHeight : 0
-        width: parent.width
-        label: "Camera"
-        value: root.webcamDevices.length === 0 ? "No cameras found" : root.deviceLabel(root.webcamDevices, omaloomSettings.webcamDevice, "Default camera")
-        enabled: root.canStart && root.webcamDevices.length > 0
-        onActivated: root.webcamListOpen = !root.webcamListOpen
-      }
-
-      Repeater {
-        model: (!root.countdown && omaloomSettings.recordWebcam && root.webcamListOpen) ? root.webcamDevices : []
-        DeviceChoiceRow {
-          width: panelColumn.width
-          label: modelData.label || modelData.id
-          selected: omaloomSettings.webcamDevice === modelData.id
-          enabled: root.canStart
-          onActivated: {
-            omaloomSettings.webcamDevice = modelData.id
-            root.webcamListOpen = false
-          }
-        }
-      }
-
-      Item {
-        visible: !root.countdown && (omaloomSettings.recordMicrophone || omaloomSettings.recordWebcam)
-        width: parent.width
-        height: visible ? Style.space(22) : 0
-
-        Rectangle {
-          anchors.left: parent.left
-          anchors.right: previewLabel.left
-          anchors.rightMargin: Style.space(8)
-          anchors.verticalCenter: parent.verticalCenter
-          height: 1
-          color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.22)
+        Text {
+          width: parent.width
+          text: "Recording starts in"
+          color: root.contentForeground
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.title
+          font.bold: true
+          horizontalAlignment: Text.AlignHCenter
         }
 
         Text {
-          id: previewLabel
-          anchors.horizontalCenter: parent.horizontalCenter
-          anchors.verticalCenter: parent.verticalCenter
-          text: "LIVE PREVIEW"
-          color: Qt.darker(root.contentForeground, 1.45)
+          width: parent.width
+          text: String(root.countdownRemaining)
+          color: Color.accent
           font.family: root.contentFontFamily
-          font.pixelSize: Style.font.caption
+          font.pixelSize: Style.space(150)
           font.bold: true
+          horizontalAlignment: Text.AlignHCenter
         }
 
-        Rectangle {
-          anchors.left: previewLabel.right
-          anchors.leftMargin: Style.space(8)
-          anchors.right: parent.right
-          anchors.verticalCenter: parent.verticalCenter
-          height: 1
-          color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.22)
+        Text {
+          width: parent.width
+          text: "Keep the selected area clear. Recording begins after countdown."
+          color: Qt.darker(root.contentForeground, 1.45)
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.bodySmall
+          horizontalAlignment: Text.AlignHCenter
+          wrapMode: Text.Wrap
         }
       }
 
-      Row {
-        visible: !root.countdown && (omaloomSettings.recordMicrophone || omaloomSettings.recordWebcam)
-        height: visible ? Math.max(micMeterLoader.height, webcamPreview.height) : 0
-        width: parent.width
-        spacing: Style.space(10)
+      Column {
+        id: dashboard
+        visible: !root.countdown
+        anchors.fill: parent
+        spacing: Style.space(12)
 
-        Loader {
-          id: micMeterLoader
-          width: parent.width - (webcamPreview.visible ? webcamPreview.width + parent.spacing : 0)
-          visible: omaloomSettings.recordMicrophone
-          height: visible ? Style.space(44) : 0
-          active: root.setupResourcesActive && omaloomSettings.recordMicrophone
-          sourceComponent: Component {
-            MicMeter {
-              width: micMeterLoader.width
-              height: micMeterLoader.height
-              active: true
-              level: root.microphoneLevel
+        Row {
+          width: parent.width
+          height: titleBlock.implicitHeight
+          spacing: Style.space(12)
+
+          Column {
+            id: titleBlock
+            width: parent.width - statusText.width - parent.spacing
+            spacing: Style.space(2)
+
+            Text {
+              width: parent.width
+              text: "Omaloom"
+              color: root.contentForeground
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.title
+              font.bold: true
             }
-          }
-        }
 
-        Rectangle {
-          id: webcamPreview
-          visible: omaloomSettings.recordWebcam
-          width: Style.space(112)
-          height: width
-          radius: Style.cornerRadius
-          color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.08)
-          border.color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.22)
-          clip: true
-
-          VideoOutput {
-            id: previewOutput
-            anchors.fill: parent
-            visible: root.previewActive
-            fillMode: VideoOutput.PreserveAspectCrop
+            Text {
+              width: parent.width
+              text: root.recording ? "Recording" : (root.preparing ? "Preparing…" : (root.starting ? "Starting…" : "Local screen recording"))
+              color: Qt.darker(root.contentForeground, 1.35)
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+              elide: Text.ElideRight
+            }
           }
 
           Text {
-            anchors.centerIn: parent
-            width: parent.width - Style.space(12)
-            text: root.webcamDevices.length === 0 ? "No camera" : "Preview"
-            visible: !root.previewActive
-            color: Qt.darker(root.contentForeground, 1.45)
+            id: statusText
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.recording ? "REC" : (root.preparing ? "PREP" : (root.starting ? "GO" : (root.recordingsLoading ? "SYNC" : "READY")))
+            color: root.recording ? Color.urgent : root.contentForeground
             font.family: root.contentFontFamily
-            font.pixelSize: Style.font.caption
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.Wrap
+            font.pixelSize: Style.font.bodySmall
+            font.bold: true
+          }
+        }
+
+        Row {
+          visible: popup.narrowDashboard
+          height: visible ? Style.space(34) : 0
+          width: parent.width
+          spacing: Style.space(8)
+
+          DashboardTabButton { label: "Record"; selected: root.dashboardTab === "record"; onClicked: root.dashboardTab = "record" }
+          DashboardTabButton { label: "Library"; selected: root.dashboardTab === "library"; onClicked: root.dashboardTab = "library" }
+        }
+
+        Row {
+          visible: !popup.narrowDashboard
+          width: parent.width
+          height: parent.height - y
+          spacing: Style.space(14)
+
+          RecordDashboardColumn {
+            width: Math.round((parent.width - parent.spacing) * 0.52)
+            height: parent.height
+            previewTargetActive: !popup.narrowDashboard
+          }
+
+          Rectangle {
+            width: 1
+            height: parent.height
+            color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.14)
+          }
+
+          LibraryDashboardColumn {
+            width: parent.width - Math.round((parent.width - parent.spacing) * 0.52) - parent.spacing - 1
+            height: parent.height
+          }
+        }
+
+        Item {
+          visible: popup.narrowDashboard
+          width: parent.width
+          height: parent.height - y
+
+          RecordDashboardColumn {
+            visible: root.dashboardTab === "record"
+            anchors.fill: parent
+            previewTargetActive: visible
+          }
+
+          LibraryDashboardColumn {
+            visible: root.dashboardTab === "library"
+            anchors.fill: parent
           }
         }
       }
+    }
+  }
+
+  component RecordDashboardColumn: Column {
+    id: recordColumn
+    property bool previewTargetActive: false
+    spacing: Style.space(10)
+
+    Text {
+      width: parent.width
+      text: "RECORD"
+      color: root.contentForeground
+      font.family: root.contentFontFamily
+      font.pixelSize: Style.font.bodySmall
+      font.bold: true
+    }
+
+    SelectorRow {
+      width: parent.width
+      label: "Folder"
+      value: omaloomSettings.outputDirectory
+      enabled: root.canStart
+      onActivated: root.openFolderPicker()
+    }
+
+    ToggleRow {
+      width: parent.width
+      label: "Current monitor / fullscreen"
+      checked: omaloomSettings.recordFullscreen
+      enabled: root.canStart
+      onToggled: function(checked) { omaloomSettings.recordFullscreen = checked }
+    }
+
+    ToggleRow {
+      width: parent.width
+      label: "System audio"
+      checked: omaloomSettings.recordSystemAudio
+      enabled: root.canStart
+      onToggled: function(checked) { omaloomSettings.recordSystemAudio = checked }
+    }
+
+    ToggleRow {
+      width: parent.width
+      label: "Microphone"
+      checked: omaloomSettings.recordMicrophone
+      enabled: root.canStart
+      onToggled: function(checked) { omaloomSettings.recordMicrophone = checked }
+    }
+
+    SelectorRow {
+      visible: omaloomSettings.recordMicrophone
+      height: visible ? implicitHeight : 0
+      width: parent.width
+      label: "Mic input"
+      value: root.microphoneDevices.length === 0 ? "No microphones found" : root.deviceLabel(root.microphoneDevices, omaloomSettings.microphoneDevice || "default_input", "Default microphone")
+      enabled: root.canStart && root.microphoneDevices.length > 0
+      onActivated: root.microphoneListOpen = !root.microphoneListOpen
+    }
+
+    Repeater {
+      model: omaloomSettings.recordMicrophone && root.microphoneListOpen ? root.microphoneDevices : []
+      DeviceChoiceRow {
+        width: recordColumn.width
+        label: modelData.label || modelData.id
+        selected: (omaloomSettings.microphoneDevice || "default_input") === modelData.id
+        enabled: root.canStart
+        onActivated: {
+          omaloomSettings.microphoneDevice = modelData.id
+          root.microphoneListOpen = false
+        }
+      }
+    }
+
+    ToggleRow {
+      width: parent.width
+      label: "Webcam overlay"
+      checked: omaloomSettings.recordWebcam
+      enabled: root.canStart
+      onToggled: function(checked) { omaloomSettings.recordWebcam = checked }
+    }
+
+    SelectorRow {
+      visible: omaloomSettings.recordWebcam
+      height: visible ? implicitHeight : 0
+      width: parent.width
+      label: "Camera"
+      value: root.webcamDevices.length === 0 ? "No cameras found" : root.deviceLabel(root.webcamDevices, omaloomSettings.webcamDevice, "Default camera")
+      enabled: root.canStart && root.webcamDevices.length > 0
+      onActivated: root.webcamListOpen = !root.webcamListOpen
+    }
+
+    Repeater {
+      model: omaloomSettings.recordWebcam && root.webcamListOpen ? root.webcamDevices : []
+      DeviceChoiceRow {
+        width: recordColumn.width
+        label: modelData.label || modelData.id
+        selected: omaloomSettings.webcamDevice === modelData.id
+        enabled: root.canStart
+        onActivated: {
+          omaloomSettings.webcamDevice = modelData.id
+          root.webcamListOpen = false
+        }
+      }
+    }
+
+    Item {
+      visible: omaloomSettings.recordMicrophone || omaloomSettings.recordWebcam
+      width: parent.width
+      height: visible ? Style.space(20) : 0
+
+      Rectangle { anchors.left: parent.left; anchors.right: previewLabel.left; anchors.rightMargin: Style.space(8); anchors.verticalCenter: parent.verticalCenter; height: 1; color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.22) }
+      Text { id: previewLabel; anchors.horizontalCenter: parent.horizontalCenter; anchors.verticalCenter: parent.verticalCenter; text: "LIVE PREVIEW"; color: Qt.darker(root.contentForeground, 1.45); font.family: root.contentFontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+      Rectangle { anchors.left: previewLabel.right; anchors.leftMargin: Style.space(8); anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; height: 1; color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.22) }
+    }
+
+    Row {
+      visible: omaloomSettings.recordMicrophone || omaloomSettings.recordWebcam
+      height: visible ? Math.max(micMeterLoader.height, webcamPreview.height) : 0
+      width: parent.width
+      spacing: Style.space(10)
+
+      Loader {
+        id: micMeterLoader
+        width: parent.width - (webcamPreview.visible ? webcamPreview.width + parent.spacing : 0)
+        visible: omaloomSettings.recordMicrophone
+        height: visible ? Style.space(44) : 0
+        active: root.setupResourcesActive && omaloomSettings.recordMicrophone
+        sourceComponent: Component { MicMeter { width: micMeterLoader.width; height: micMeterLoader.height; active: true; level: root.microphoneLevel } }
+      }
+
+      Rectangle {
+        id: webcamPreview
+        visible: omaloomSettings.recordWebcam
+        width: Style.space(112)
+        height: width
+        radius: Style.cornerRadius
+        color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.08)
+        border.color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.22)
+        clip: true
+
+        VideoOutput {
+          id: previewOutput
+          anchors.fill: parent
+          visible: root.previewActive && recordColumn.previewTargetActive
+          fillMode: VideoOutput.PreserveAspectCrop
+          Component.onCompleted: if (recordColumn.previewTargetActive) root.previewOutputTarget = previewOutput
+          Component.onDestruction: if (root.previewOutputTarget === previewOutput) root.previewOutputTarget = null
+        }
+
+        Connections {
+          target: recordColumn
+          function onPreviewTargetActiveChanged() {
+            if (recordColumn.previewTargetActive) root.previewOutputTarget = previewOutput
+            else if (root.previewOutputTarget === previewOutput) root.previewOutputTarget = null
+          }
+        }
+        Text { anchors.centerIn: parent; width: parent.width - Style.space(12); text: root.webcamDevices.length === 0 ? "No camera" : "Preview"; visible: !root.previewActive; color: Qt.darker(root.contentForeground, 1.45); font.family: root.contentFontFamily; font.pixelSize: Style.font.caption; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap }
+      }
+    }
+
+    Item { width: parent.width; height: Style.space(4) }
+
+    Text {
+      width: parent.width
+      text: root.lastMessage
+      color: Qt.darker(root.contentForeground, 1.6)
+      font.family: root.contentFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.Wrap
+      elide: Text.ElideRight
+      maximumLineCount: 2
+    }
+
+    ActionButton {
+      width: parent.width
+      height: Style.space(38)
+      label: root.state === "error" || root.state === "saved" ? "Start again" : "Start recording"
+      enabled: root.canStart
+      onClicked: root.startRecording()
+    }
+  }
+
+  component LibraryDashboardColumn: Column {
+    id: libraryColumn
+    readonly property real contentRightInset: Style.space(8)
+    spacing: Style.space(8)
+
+    Row {
+      width: parent.width - libraryColumn.contentRightInset
+      height: libraryTitle.implicitHeight
+      spacing: Style.space(8)
 
       Text {
-        visible: !root.countdown
-        height: visible ? implicitHeight : 0
-        width: parent.width
-        text: root.lastMessage + (root.recording ? " Use the Omarchy stop button at the top center to finish." : "")
-        color: Qt.darker(root.contentForeground, 1.6)
+        id: libraryTitle
+        width: parent.width - countText.width - parent.spacing
+        text: "LIBRARY"
+        color: root.contentForeground
         font.family: root.contentFontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.Wrap
-        elide: Text.ElideRight
-        maximumLineCount: 3
+        font.pixelSize: Style.font.bodySmall
+        font.bold: true
       }
 
-      ActionButton {
-        visible: !root.countdown
-        width: parent.width
-        height: visible ? Style.space(34) : 0
-        label: root.state === "error" || root.state === "saved" ? "Start again" : "Start recording"
-        enabled: root.canStart
-        onClicked: root.startRecording()
+      Text {
+        id: countText
+        text: root.recordingsLoading ? "…" : (root.recordings.length + " MP4" + (root.recordings.length === 1 ? "" : "s"))
+        color: Qt.darker(root.contentForeground, 1.45)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
       }
+    }
+
+    Text {
+      visible: !root.busy && (root.recordingsLoading || root.recordingsError !== "" || root.actionFeedback !== "")
+      width: parent.width - libraryColumn.contentRightInset
+      text: root.recordingsLoading ? "Loading recordings…" : (root.actionFeedback !== "" ? root.actionFeedback : root.recordingsError)
+      color: (root.actionFeedback !== "" ? root.actionFeedbackError : root.recordingsError !== "") ? Color.urgent : Qt.darker(root.contentForeground, 1.45)
+      font.family: root.contentFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.Wrap
+      maximumLineCount: 2
+    }
+
+    Rectangle {
+      visible: !root.busy && root.recordings.length === 0 && !root.recordingsLoading && root.recordingsError === ""
+      height: visible ? Style.space(72) : 0
+      width: parent.width - libraryColumn.contentRightInset
+      radius: Style.cornerRadius
+      color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.04)
+      border.color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.12)
+
+      Text {
+        anchors.centerIn: parent
+        width: parent.width - Style.space(24)
+        text: "No MP4 recordings found in the selected folder."
+        color: Qt.darker(root.contentForeground, 1.45)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.bodySmall
+        horizontalAlignment: Text.AlignHCenter
+        wrapMode: Text.Wrap
+      }
+    }
+
+    ListView {
+      id: recordingList
+      visible: !root.busy && root.recordings.length > 0
+      height: visible ? Math.max(Style.space(120), libraryColumn.height - y) : 0
+      width: parent.width - libraryColumn.contentRightInset
+      clip: true
+      interactive: contentHeight > height
+      boundsBehavior: Flickable.StopAtBounds
+      spacing: Style.space(4)
+      model: visible ? root.recordings : []
+      delegate: RecordingLibraryRow {
+        width: recordingList.width
+        item: modelData
+        enabled: !recordingActionProcess.running && !root.recordingsLoading
+      }
+    }
+  }
+
+  component DashboardTabButton: Rectangle {
+    id: tabRoot
+    property string label: ""
+    property bool selected: false
+    signal clicked()
+
+    width: (parent.width - parent.spacing) / 2
+    height: Style.space(34)
+    radius: Style.cornerRadius
+    color: selected ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.22) : Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.06)
+    border.color: selected ? Color.accent : Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.18)
+
+    Text {
+      anchors.centerIn: parent
+      text: tabRoot.label
+      color: root.contentForeground
+      font.family: root.contentFontFamily
+      font.pixelSize: Style.font.bodySmall
+      font.bold: tabRoot.selected
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      cursorShape: Qt.PointingHandCursor
+      onClicked: tabRoot.clicked()
+    }
+  }
+
+  component MiniActionButton: Rectangle {
+    id: miniRoot
+    property string label: ""
+    signal clicked()
+
+    width: labelText.implicitWidth + Style.space(16)
+    height: Style.space(24)
+    radius: Style.cornerRadius
+    color: enabled ? Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.08) : "transparent"
+    border.color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, enabled ? 0.28 : 0.12)
+    opacity: enabled ? 1 : 0.55
+
+    Text {
+      id: labelText
+      anchors.centerIn: parent
+      text: miniRoot.label
+      color: root.contentForeground
+      font.family: root.contentFontFamily
+      font.pixelSize: Style.font.caption
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      enabled: miniRoot.enabled
+      cursorShape: Qt.PointingHandCursor
+      onClicked: miniRoot.clicked()
+    }
+  }
+
+  component RecordingLibraryRow: Rectangle {
+    id: rowRoot
+    property var item: null
+
+    height: Style.space(48)
+    radius: Style.cornerRadius
+    color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.045)
+    border.color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.11)
+
+    Text {
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(8)
+      anchors.right: actionRow.left
+      anchors.rightMargin: Style.space(8)
+      anchors.top: parent.top
+      anchors.topMargin: Style.space(5)
+      text: rowRoot.item ? rowRoot.item.name : ""
+      color: rowRoot.enabled ? root.contentForeground : Qt.darker(root.contentForeground, 1.8)
+      font.family: root.contentFontFamily
+      font.pixelSize: Style.font.caption
+      elide: Text.ElideMiddle
+    }
+
+    Text {
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(8)
+      anchors.right: actionRow.left
+      anchors.rightMargin: Style.space(8)
+      anchors.bottom: parent.bottom
+      anchors.bottomMargin: Style.space(5)
+      text: root.recordingMeta(rowRoot.item)
+      color: Qt.darker(root.contentForeground, 1.55)
+      font.family: root.contentFontFamily
+      font.pixelSize: Style.font.caption
+      elide: Text.ElideRight
+    }
+
+    Row {
+      id: actionRow
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(6)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(4)
+      MiniActionButton { label: "Open"; enabled: rowRoot.enabled; onClicked: root.runRecordingAction("open", rowRoot.item.path) }
+      MiniActionButton { label: "Reveal"; enabled: rowRoot.enabled; onClicked: root.runRecordingAction("reveal", rowRoot.item.path) }
+      MiniActionButton { label: "Copy"; enabled: rowRoot.enabled; onClicked: root.runRecordingAction("copy-path", rowRoot.item.path) }
+    }
+
+    MouseArea {
+      anchors.left: parent.left
+      anchors.right: actionRow.left
+      anchors.top: parent.top
+      anchors.bottom: parent.bottom
+      enabled: rowRoot.enabled
+      cursorShape: Qt.PointingHandCursor
+      onClicked: root.runRecordingAction("open", rowRoot.item.path)
     }
   }
 

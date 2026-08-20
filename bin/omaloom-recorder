@@ -37,18 +37,22 @@ emit() {
   fi
 }
 
+emit_source_selected() {
+  local target=$1
+  local event=""
+  if [[ -x "$SCRIPT_DIR/omaloom-geometry" ]]; then
+    event=$("$SCRIPT_DIR/omaloom-geometry" source-selected "$target" 2>/dev/null || true)
+  fi
+  if [[ $event == \{* ]]; then
+    printf '%s\n' "$event"
+  else
+    printf '{"event":"source_selected","target":"%s"}\n' "$(json_escape "$target")"
+  fi
+}
+
 emit_recording_started() {
   local path=$1
-  local target=${2-}
-  local guide=""
-  if [[ $target == region:* && -x "$SCRIPT_DIR/omaloom-geometry" ]]; then
-    guide=$("$SCRIPT_DIR/omaloom-geometry" guide "$target" 2>/dev/null || true)
-  fi
-  if [[ $guide == \{* ]]; then
-    printf '{"event":"recording_started","path":"%s","guide":%s}\n' "$(json_escape "$path")" "$guide"
-  else
-    printf '{"event":"recording_started","path":"%s"}\n' "$(json_escape "$path")"
-  fi
+  printf '{"event":"recording_started","path":"%s"}\n' "$(json_escape "$path")"
 }
 
 fail() {
@@ -223,8 +227,7 @@ start_recording() {
     emit cancelled
     exit 3
   fi
-  emit source_selected target "$target"
-
+  emit_source_selected "$target"
   local capture_args=()
   case $target in
     monitor:*) capture_args=(-w "${target#monitor:}" -s "$(default_resolution)") ;;
@@ -268,7 +271,7 @@ start_recording() {
   if kill -0 "$pid" 2>/dev/null; then
     echo "$filename" >"$RECORDING_FILE"
     toggle_screenrecording_indicator
-    emit_recording_started "$filename" "$target"
+    emit_recording_started "$filename"
   else
     cleanup_webcam
     fail "recording process exited before creating output"

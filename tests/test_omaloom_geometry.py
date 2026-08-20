@@ -45,6 +45,15 @@ def test_monitor_dimensions_are_logical_and_transform_aware():
     assert monitors[1]["height"] == 1920
 
 
+def test_source_selected_event_includes_guide_only_for_regions():
+    region_event = module.source_selected_event("region:100x100+10+10", json.dumps(MONITORS))
+    assert region_event["event"] == "source_selected"
+    assert region_event["guide"]["type"] == "region"
+
+    monitor_event = module.source_selected_event("monitor:DP-1", json.dumps(MONITORS))
+    assert monitor_event == {"event": "source_selected", "target": "monitor:DP-1"}
+
+
 def test_cli_outputs_machine_json():
     proc = subprocess.run(
         [str(HELPER), "guide", "region:100x100+10+10", "--monitors-json", json.dumps(MONITORS)],
@@ -56,10 +65,21 @@ def test_cli_outputs_machine_json():
     assert payload["type"] == "region"
     assert payload["monitors"][0]["name"] == "MAIN"
 
+    proc = subprocess.run(
+        [str(HELPER), "source-selected", "region:100x100+10+10", "--monitors-json", json.dumps(MONITORS)],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    event = json.loads(proc.stdout)
+    assert event["event"] == "source_selected"
+    assert event["guide"]["region"] == {"x": 10, "y": 10, "width": 100, "height": 100}
+
 
 if __name__ == "__main__":
     test_parse_negative_region_target()
     test_monitor_mapping_spans_negative_and_primary()
     test_monitor_dimensions_are_logical_and_transform_aware()
+    test_source_selected_event_includes_guide_only_for_regions()
     test_cli_outputs_machine_json()
     print("geometry tests passed")
