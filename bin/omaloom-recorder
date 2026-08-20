@@ -10,7 +10,7 @@ LOG_FILE=$([[ ${OMARCHY_SCREENRECORD_DEBUG:-false} == "true" ]] && echo "/tmp/om
 usage() {
   cat <<'USAGE'
 Usage:
-  omaloom-recorder start [--directory DIR] [--fullscreen] [--desktop-audio] [--microphone] [--microphone-device DEVICE] [--webcam] [--webcam-device DEVICE]
+  omaloom-recorder start [--directory DIR] [--fullscreen] [--desktop-audio] [--microphone] [--microphone-device DEVICE] [--webcam] [--webcam-device DEVICE] [--webcam-position POS] [--webcam-size SIZE]
   omaloom-recorder stop
   omaloom-recorder status
 USAGE
@@ -125,7 +125,8 @@ microphone_available() {
 start_webcam_overlay() {
   local target=${1-}
   local webcam_device=${2-}
-  local webcam_size="medium"
+  local webcam_size=${3:-medium}
+  local webcam_position=${4:-bottom-right}
 
   cleanup_webcam
 
@@ -166,8 +167,11 @@ start_webcam_overlay() {
 
   [[ $target == region:* ]] && echo "${target#region:}" >"$REGION_FILE"
   omarchy-capture-webcam-resize "$webcam_size"
+  if [[ -x "$SCRIPT_DIR/omaloom-webcam-placement" ]]; then
+    "$SCRIPT_DIR/omaloom-webcam-placement" apply --target "$target" --size "$webcam_size" --position "$webcam_position" || true
+  fi
 
-  sleep 0.6
+  sleep 1
 }
 
 toggle_screenrecording_indicator() {
@@ -182,6 +186,8 @@ start_recording() {
   local webcam=false
   local microphone_device=""
   local webcam_device=""
+  local webcam_size="medium"
+  local webcam_position="bottom-right"
 
   while (($#)); do
     case $1 in
@@ -207,11 +213,26 @@ start_recording() {
         webcam_device=$1
         ;;
       --webcam-device=*) webcam_device=${1#*=} ;;
+      --webcam-size)
+        shift
+        [[ $# -gt 0 ]] || fail "--webcam-size requires a value"
+        webcam_size=$1
+        ;;
+      --webcam-size=*) webcam_size=${1#*=} ;;
+      --webcam-position)
+        shift
+        [[ $# -gt 0 ]] || fail "--webcam-position requires a value"
+        webcam_position=$1
+        ;;
+      --webcam-position=*) webcam_position=${1#*=} ;;
       -h|--help) usage; exit 0 ;;
       *) fail "unknown start option: $1" ;;
     esac
     shift
   done
+
+  case $webcam_size in small|medium|large) ;; *) fail "invalid webcam size: $webcam_size" ;; esac
+  case $webcam_position in top-left|top-right|bottom-left|bottom-right) ;; *) fail "invalid webcam position: $webcam_position" ;; esac
 
   command -v gpu-screen-recorder >/dev/null 2>&1 || fail "gpu-screen-recorder command not found"
   command -v omarchy-capture-region >/dev/null 2>&1 || fail "omarchy-capture-region command not found"
@@ -238,7 +259,7 @@ start_recording() {
   # Prepare and place the real mpv webcam overlay before the visible countdown.
   # This keeps camera startup latency out of the gap between 1 and capture.
   if [[ $webcam == true ]]; then
-    start_webcam_overlay "$target" "$webcam_device" || exit 1
+    start_webcam_overlay "$target" "$webcam_device" "$webcam_size" "$webcam_position" || exit 1
   fi
 
   countdown

@@ -52,6 +52,8 @@ Panel {
     if (omaloomSettings.recordWebcam) {
       args.push("--webcam")
       if (omaloomSettings.webcamDevice !== "") args.push("--webcam-device", omaloomSettings.webcamDevice)
+      args.push("--webcam-position", omaloomSettings.webcamPosition)
+      args.push("--webcam-size", omaloomSettings.webcamSize)
     }
     state = omaloomSettings.recordFullscreen ? "recording" : "selecting"
     actionProcess.command = args

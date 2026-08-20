@@ -25,10 +25,14 @@ DEFAULTS: dict[str, Any] = {
     "webcam": False,
     "microphoneDevice": "",
     "webcamDevice": "",
+    "webcamPosition": "bottom-right",
+    "webcamSize": "medium",
 }
 
 BOOL_KEYS = {"fullscreenCurrentMonitor", "systemAudio", "microphone", "webcam"}
-STRING_KEYS = {"outputDirectory", "microphoneDevice", "webcamDevice"}
+STRING_KEYS = {"outputDirectory", "microphoneDevice", "webcamDevice", "webcamPosition", "webcamSize"}
+WEBCAM_POSITIONS = {"top-left", "top-right", "bottom-left", "bottom-right"}
+WEBCAM_SIZES = {"small", "medium", "large"}
 CONFIG_DIR = pathlib.Path.home() / ".config" / "omaloom"
 SETTINGS_PATH = CONFIG_DIR / "settings.json"
 LOCK_PATH = CONFIG_DIR / "settings.lock"
@@ -47,6 +51,14 @@ def normalize(raw: Any) -> dict[str, Any]:
         value = raw.get(key)
         if isinstance(value, str):
             settings[key] = value
+
+    value = raw.get("webcamPosition")
+    if isinstance(value, str) and value in WEBCAM_POSITIONS:
+        settings["webcamPosition"] = value
+
+    value = raw.get("webcamSize")
+    if isinstance(value, str) and value in WEBCAM_SIZES:
+        settings["webcamSize"] = value
 
     for key in BOOL_KEYS:
         value = raw.get(key)
@@ -99,6 +111,14 @@ def parse_value(key: str, value: str) -> Any:
     if key == "outputDirectory":
         if not value:
             raise ValueError(f"{key} must not be empty")
+        return value
+    if key == "webcamPosition":
+        if value not in WEBCAM_POSITIONS:
+            raise ValueError(f"{key} must be one of: {', '.join(sorted(WEBCAM_POSITIONS))}")
+        return value
+    if key == "webcamSize":
+        if value not in WEBCAM_SIZES:
+            raise ValueError(f"{key} must be one of: {', '.join(sorted(WEBCAM_SIZES))}")
         return value
     if key in STRING_KEYS:
         return value

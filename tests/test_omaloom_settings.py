@@ -27,6 +27,8 @@ def test_absent_and_malformed_defaults_then_merge_set():
             "webcam": False,
             "microphoneDevice": "",
             "webcamDevice": "",
+            "webcamPosition": "bottom-right",
+            "webcamSize": "medium",
         }
 
         settings_path = home / ".config" / "omaloom" / "settings.json"
@@ -42,7 +44,12 @@ def test_absent_and_malformed_defaults_then_merge_set():
         assert after_mic["systemAudio"] is False
         assert after_mic["microphone"] is False
         assert after_mic["microphoneDevice"] == "alsa_input.test"
-        assert json.loads(settings_path.read_text(encoding="utf-8")) == after_mic
+        after_pos = json.loads(run(home, "set", "webcamPosition", "top-left").stdout)
+        after_size = json.loads(run(home, "set", "webcamSize", "large").stdout)
+        assert after_pos["webcamPosition"] == "top-left"
+        assert after_size["webcamPosition"] == "top-left"
+        assert after_size["webcamSize"] == "large"
+        assert json.loads(settings_path.read_text(encoding="utf-8")) == after_size
 
 
 def test_rejects_unknown_key_without_shell_parsing():
@@ -58,6 +65,14 @@ def test_rejects_unknown_key_without_shell_parsing():
         )
         assert proc.returncode == 2
         assert not (home / ".config" / "omaloom" / "settings.json").exists()
+
+        proc = subprocess.run(
+            [str(HELPER), "set", "webcamPosition", "center;touch /tmp/nope"],
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        assert proc.returncode == 2
 
 
 if __name__ == "__main__":

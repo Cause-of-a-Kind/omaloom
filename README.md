@@ -22,7 +22,7 @@ Omaloom (`coak.omaloom`) is a Cause of a Kind Omarchy plugin for fast local MP4 
 - Visible 5–1 countdown before recording starts.
 - Region captures show a click-through, outside-only guide from selection through recording.
 - Optional system audio and microphone capture as separate toggles.
-- Microphone and webcam device selectors with setup-only live mic meter and camera preview.
+- Microphone and webcam device selectors with setup-only live mic meter and representative composition preview.
 - Portal-backed output folder picker isolated from Quickshell.
 - Persistent settings in `~/.config/omaloom/settings.json`.
 - Local recordings library scanned from the selected output folder, with Open, Reveal, and Copy path actions.
@@ -78,8 +78,10 @@ Current-monitor/fullscreen capture skips the interactive source selector. Region
 - **Mic input** — choose from available PipeWire/Pulse input sources.
 - **Webcam overlay** — include an Omarchy-style webcam overlay in the final recording.
 - **Camera** — choose an available `/dev/video*` camera.
+- **Position** — choose the overlay corner: top-left, top-right, bottom-left, or bottom-right.
+- **Size** — choose small, medium, or large using Omarchy's overlay size ladder.
 
-The setup preview resources are temporary: the mic meter and camera preview run only while the setup UI is open and enabled, and they are destroyed before selection/countdown/recording.
+The setup preview resources are temporary: the mic meter and composition preview run only while the setup UI is open and enabled, and they are destroyed before selection/countdown/recording. The composition preview uses the popup's current monitor aspect ratio and is representative before region selection; after selection the actual mpv webcam overlay is resized and moved to the selected corner of the chosen region or monitor before the numeric countdown begins.
 
 ## Library
 
@@ -110,7 +112,7 @@ Omaloom is designed for Omarchy Quattro/Quickshell on Wayland and expects the sa
 ## CLI helpers
 
 ```bash
-bin/omaloom-recorder start --directory ~/Videos/Omaloom --fullscreen --desktop-audio --microphone --microphone-device default_input --webcam --webcam-device /dev/video0
+bin/omaloom-recorder start --directory ~/Videos/Omaloom --fullscreen --desktop-audio --microphone --microphone-device default_input --webcam --webcam-device /dev/video0 --webcam-position bottom-right --webcam-size medium
 bin/omaloom-recorder status
 bin/omaloom-recorder stop
 
@@ -133,15 +135,16 @@ All QML-to-helper calls pass argv arrays, not shell-concatenated commands.
 - `bin/omaloom-folder-picker` — portal-backed folder picker process.
 - `bin/omaloom-devices` — microphone/camera discovery and mic meter helper.
 - `bin/omaloom-geometry` — region/monitor mapping and guide event JSON.
+- `bin/omaloom-webcam-placement` — testable webcam overlay size/corner placement helper.
 - `bin/omaloom-recordings` — saved MP4 listing and desktop actions.
 
-More detail: [`docs/architecture.md`](docs/architecture.md), [`docs/PLAN.md`](docs/PLAN.md), and [`docs/MILESTONE-3.md`](docs/MILESTONE-3.md).
+More detail: [`docs/architecture.md`](docs/architecture.md), [`docs/PLAN.md`](docs/PLAN.md), [`docs/MILESTONE-3.md`](docs/MILESTONE-3.md), and [`docs/MILESTONE-4.md`](docs/MILESTONE-4.md).
 
 ## Development and validation
 
 ```bash
 bash -n bin/omaloom-recorder
-python3 -m py_compile bin/omaloom-settings bin/omaloom-devices bin/omaloom-folder-picker bin/omaloom-geometry bin/omaloom-recordings tests/test_omaloom_*.py
+python3 -m py_compile bin/omaloom-settings bin/omaloom-devices bin/omaloom-folder-picker bin/omaloom-geometry bin/omaloom-webcam-placement bin/omaloom-recordings tests/test_omaloom_*.py
 for t in tests/test_omaloom_*.py; do PYTHONDONTWRITEBYTECODE=1 python3 "$t"; done
 qmllint qml/*.qml
 omarchy plugin validate .

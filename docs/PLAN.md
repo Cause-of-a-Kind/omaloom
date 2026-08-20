@@ -58,7 +58,8 @@ Confirmed through milestone 2:
 - Persistent output folder and capture settings.
 - Portal-backed output folder selection.
 - Microphone and webcam device selectors.
-- Setup-only live microphone waveform and webcam preview.
+- Configurable webcam overlay size and corner placement.
+- Setup-only live microphone waveform and representative webcam composition preview.
 - Region-aware webcam overlay placement.
 - Click-through, outside-only region recording guide.
 - Compact scrollable library list scanned from the selected output folder, with Open/Reveal/Copy path actions per MP4.
@@ -111,7 +112,7 @@ omarchy screenrecord --stop-recording
 The wrapper exposes a stable Omaloom interface:
 
 ```bash
-omaloom-recorder start [--directory DIR] [--fullscreen] [--desktop-audio] [--microphone] [--microphone-device DEVICE] [--webcam] [--webcam-device DEVICE]
+omaloom-recorder start [--directory DIR] [--fullscreen] [--desktop-audio] [--microphone] [--microphone-device DEVICE] [--webcam] [--webcam-device DEVICE] [--webcam-position POS] [--webcam-size SIZE]
 omaloom-recorder stop
 omaloom-recorder status
 ```
@@ -158,7 +159,9 @@ Persisted settings:
   "microphone": true,
   "microphoneDevice": "",
   "webcam": false,
-  "webcamDevice": ""
+  "webcamDevice": "",
+  "webcamPosition": "bottom-right",
+  "webcamSize": "medium"
 }
 ```
 

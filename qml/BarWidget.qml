@@ -100,6 +100,8 @@ Panel {
     if (omaloomSettings.recordWebcam) {
       args.push("--webcam")
       if (omaloomSettings.webcamDevice !== "") args.push("--webcam-device", omaloomSettings.webcamDevice)
+      args.push("--webcam-position", omaloomSettings.webcamPosition)
+      args.push("--webcam-size", omaloomSettings.webcamSize)
     }
     lastMessage = omaloomSettings.recordFullscreen ? "Preparing current-monitor recording…" : "Preparing source selector…"
     lastSavedPath = ""
@@ -211,6 +213,34 @@ Panel {
     }
     if (id !== "") return fallback + " (disconnected)"
     return fallback
+  }
+
+  function optionLabel(value) {
+    var words = String(value || "").split("-")
+    for (var i = 0; i < words.length; i++) words[i] = words[i].charAt(0).toUpperCase() + words[i].slice(1)
+    return words.join(" ")
+  }
+
+  function cycleWebcamPosition() {
+    var values = ["top-left", "top-right", "bottom-left", "bottom-right"]
+    var i = values.indexOf(omaloomSettings.webcamPosition)
+    omaloomSettings.webcamPosition = values[(i + 1) % values.length]
+  }
+
+  function cycleWebcamSize() {
+    var values = ["small", "medium", "large"]
+    var i = values.indexOf(omaloomSettings.webcamSize)
+    omaloomSettings.webcamSize = values[(i + 1) % values.length]
+  }
+
+  function compositionAspect() {
+    return popup && popup.screen && popup.screen.width > 0 && popup.screen.height > 0 ? popup.screen.width / popup.screen.height : 16 / 9
+  }
+
+  function webcamPreviewScale() {
+    if (omaloomSettings.webcamSize === "small") return 0.18
+    if (omaloomSettings.webcamSize === "large") return 0.3375
+    return 0.25
   }
 
   function cycleDevice(kind) {
@@ -643,7 +673,7 @@ Panel {
     readonly property bool narrowDashboard: contentWidth < Style.space(760)
 
     contentWidth: popup.fittedContentWidth(root.countdown ? Style.space(460) : Style.space(920))
-    contentHeight: popup.fittedContentHeight(root.countdown ? Style.space(360) : Style.space(640), Style.space(700))
+    contentHeight: popup.fittedContentHeight(root.countdown ? Style.space(360) : Style.space(800), Style.space(840))
 
     Item {
       id: dashboardRoot
@@ -889,39 +919,77 @@ Panel {
       }
     }
 
+    SelectorRow {
+      visible: omaloomSettings.recordWebcam
+      height: visible ? implicitHeight : 0
+      width: parent.width
+      label: "Position"
+      value: root.optionLabel(omaloomSettings.webcamPosition)
+      enabled: root.canStart
+      onActivated: root.cycleWebcamPosition()
+    }
+
+    SelectorRow {
+      visible: omaloomSettings.recordWebcam
+      height: visible ? implicitHeight : 0
+      width: parent.width
+      label: "Size"
+      value: root.optionLabel(omaloomSettings.webcamSize)
+      enabled: root.canStart
+      onActivated: root.cycleWebcamSize()
+    }
+
     Item {
       visible: omaloomSettings.recordMicrophone || omaloomSettings.recordWebcam
       width: parent.width
       height: visible ? Style.space(20) : 0
 
       Rectangle { anchors.left: parent.left; anchors.right: previewLabel.left; anchors.rightMargin: Style.space(8); anchors.verticalCenter: parent.verticalCenter; height: 1; color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.22) }
-      Text { id: previewLabel; anchors.horizontalCenter: parent.horizontalCenter; anchors.verticalCenter: parent.verticalCenter; text: "LIVE PREVIEW"; color: Qt.darker(root.contentForeground, 1.45); font.family: root.contentFontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+      Text { id: previewLabel; anchors.horizontalCenter: parent.horizontalCenter; anchors.verticalCenter: parent.verticalCenter; text: "REPRESENTATIVE PREVIEW"; color: Qt.darker(root.contentForeground, 1.45); font.family: root.contentFontFamily; font.pixelSize: Style.font.caption; font.bold: true }
       Rectangle { anchors.left: previewLabel.right; anchors.leftMargin: Style.space(8); anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; height: 1; color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.22) }
     }
 
-    Row {
-      visible: omaloomSettings.recordMicrophone || omaloomSettings.recordWebcam
-      height: visible ? Math.max(micMeterLoader.height, webcamPreview.height) : 0
+    Rectangle {
+      id: compositionCanvas
+      visible: omaloomSettings.recordWebcam
       width: parent.width
-      spacing: Style.space(10)
+      height: visible ? Math.min(Style.space(170), width / root.compositionAspect()) : 0
+      radius: Style.cornerRadius
+      color: Qt.rgba(0, 0, 0, 0.28)
+      border.color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.18)
+      clip: true
 
-      Loader {
-        id: micMeterLoader
-        width: parent.width - (webcamPreview.visible ? webcamPreview.width + parent.spacing : 0)
-        visible: omaloomSettings.recordMicrophone
-        height: visible ? Style.space(44) : 0
-        active: root.setupResourcesActive && omaloomSettings.recordMicrophone
-        sourceComponent: Component { MicMeter { width: micMeterLoader.width; height: micMeterLoader.height; active: true; level: root.microphoneLevel } }
+      readonly property real tileH: height * root.webcamPreviewScale()
+      readonly property real tileW: tileH * 8 / 9
+      readonly property real inset: Style.space(10)
+
+      Rectangle {
+        anchors.fill: parent
+        anchors.margins: Style.space(1)
+        radius: Math.max(0, compositionCanvas.radius - Style.space(1))
+        color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.035)
+      }
+
+      Text {
+        anchors.left: parent.left
+        anchors.leftMargin: Style.space(10)
+        anchors.top: parent.top
+        anchors.topMargin: Style.space(8)
+        text: "Current monitor composition"
+        color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.72)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
       }
 
       Rectangle {
-        id: webcamPreview
-        visible: omaloomSettings.recordWebcam
-        width: Style.space(112)
-        height: width
+        id: compositionTile
+        width: compositionCanvas.tileW
+        height: compositionCanvas.tileH
+        x: omaloomSettings.webcamPosition.indexOf("left") !== -1 ? compositionCanvas.inset : compositionCanvas.width - width - compositionCanvas.inset
+        y: omaloomSettings.webcamPosition.indexOf("top") !== -1 ? compositionCanvas.inset : compositionCanvas.height - height - compositionCanvas.inset
         radius: Style.cornerRadius
         color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.08)
-        border.color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.22)
+        border.color: Color.accent
         clip: true
 
         VideoOutput {
@@ -940,8 +1008,18 @@ Panel {
             else if (root.previewOutputTarget === previewOutput) root.previewOutputTarget = null
           }
         }
-        Text { anchors.centerIn: parent; width: parent.width - Style.space(12); text: root.webcamDevices.length === 0 ? "No camera" : "Preview"; visible: !root.previewActive; color: Qt.darker(root.contentForeground, 1.45); font.family: root.contentFontFamily; font.pixelSize: Style.font.caption; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap }
+
+        Text { anchors.centerIn: parent; width: parent.width - Style.space(8); text: root.webcamDevices.length === 0 ? "No camera" : "Camera"; visible: !root.previewActive; color: Qt.darker(root.contentForeground, 1.45); font.family: root.contentFontFamily; font.pixelSize: Style.font.caption; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap }
       }
+    }
+
+    Loader {
+      id: micMeterLoader
+      visible: omaloomSettings.recordMicrophone
+      width: parent.width
+      height: visible ? Style.space(44) : 0
+      active: root.setupResourcesActive && omaloomSettings.recordMicrophone
+      sourceComponent: Component { MicMeter { width: micMeterLoader.width; height: micMeterLoader.height; active: true; level: root.microphoneLevel } }
     }
 
     Item { width: parent.width; height: Style.space(4) }

@@ -10,6 +10,7 @@ coak.omaloom
 ├── bin/omaloom-folder-picker # isolated xdg-desktop-portal folder picker
 ├── bin/omaloom-geometry      # region/monitor guide mapping
 ├── bin/omaloom-recordings    # saved MP4 listing/open/reveal/copy actions
+├── bin/omaloom-webcam-placement # webcam overlay size/corner placement
 ├── bin/omaloom-devices       # capture device discovery and setup mic meter
 └── qml/
     ├── OmaloomSettings.qml    # shared settings bridge
@@ -28,7 +29,7 @@ QML owns UI and state only. It does not encode media, talk to cloud APIs, or imp
 `bin/omaloom-recorder` exposes the stable MVP interface:
 
 ```bash
-omaloom-recorder start [--directory DIR] [--fullscreen] [--desktop-audio] [--microphone] [--microphone-device DEVICE] [--webcam] [--webcam-device DEVICE]
+omaloom-recorder start [--directory DIR] [--fullscreen] [--desktop-audio] [--microphone] [--microphone-device DEVICE] [--webcam] [--webcam-device DEVICE] [--webcam-position POS] [--webcam-size SIZE]
 omaloom-recorder stop
 omaloom-recorder status
 ```
@@ -76,6 +77,8 @@ Settings are shared through `~/.config/omaloom/settings.json` with these normali
 - `webcam` (boolean, default `false`)
 - `microphoneDevice` (string PipeWire/Pulse source name, default `""` = default input)
 - `webcamDevice` (string `/dev/video*` path, default `""` = first available camera)
+- `webcamPosition` (`top-left`, `top-right`, `bottom-left`, `bottom-right`; default `bottom-right`)
+- `webcamSize` (`small`, `medium`, `large`; default `medium`)
 
 `qml/OmaloomSettings.qml` is instantiated by the service, panel, and every bar widget. It watches the settings file and applies safe defaults when the file is absent, malformed, or contains malformed fields. Control changes update local UI state immediately and call `bin/omaloom-settings set KEY VALUE` with argv-based `Process` commands, never shell-concatenated JSON.
 
@@ -85,7 +88,7 @@ Settings are shared through `~/.config/omaloom/settings.json` with these normali
 
 `bin/omaloom-devices` discovers microphones with `pactl --format=json list sources` (excluding monitor sources) and cameras with Omarchy's `omarchy-capture-webcam-list`, falling back to `v4l2-ctl --list-devices`. It also provides a setup-only microphone meter using `ffmpeg` against the selected PipeWire/Pulse source. The bar widget creates a fresh meter process and waveform when setup opens, restarts it safely when the selected device changes, and destroys it when setup closes.
 
-The webcam setup preview uses installed `QtMultimedia` (`MediaDevices`, `Camera`, `CaptureSession`, `VideoOutput`) inside the popup. A `Loader` creates the complete camera capture graph only while setup is open and webcam capture is enabled, then destroys it before selection/countdown. Destruction—not merely `Camera.active = false`—is required to release `/dev/video*` for the actual Omarchy-style mpv recording overlay. The backend prepares and places that overlay before the visible countdown, including anchoring it to a selected region. If a selected microphone/camera is disconnected, the UI labels it as disconnected where possible and the recorder falls back to default input or first available camera.
+The webcam setup preview uses installed `QtMultimedia` (`MediaDevices`, `Camera`, `CaptureSession`, `VideoOutput`) inside a representative composition canvas. The canvas uses the popup's current monitor aspect ratio and places the live camera tile at the configured corner/size (`small` ≈18%, `medium` 25%, `large` ≈33.75% of anchor height), labeled as representative before region selection. A `Loader` creates the complete camera capture graph only while setup is open and webcam capture is enabled, then destroys it before selection/countdown. Destruction—not merely `Camera.active = false`—is required to release `/dev/video*` for the actual Omarchy-style mpv recording overlay. The backend prepares that overlay after source selection, calls Omarchy's resize helper with the selected size, then `bin/omaloom-webcam-placement` moves/resizes it to the selected corner relative to the selected region or monitor and lets it settle before the visible countdown. If a selected microphone/camera is disconnected, the UI labels it as disconnected where possible and the recorder falls back to default input or first available camera.
 
 ## Region recording guide
 

@@ -17,6 +17,8 @@ Item {
   property bool recordWebcam: false
   property string microphoneDevice: ""
   property string webcamDevice: ""
+  property string webcamPosition: "bottom-right"
+  property string webcamSize: "medium"
 
   property bool initialized: false
   property bool applying: false
@@ -40,6 +42,10 @@ Item {
     recordWebcam = boolValue(obj ? obj.webcam : undefined, false)
     microphoneDevice = stringValue(obj ? obj.microphoneDevice : undefined, "")
     webcamDevice = stringValue(obj ? obj.webcamDevice : undefined, "")
+    var pos = stringValue(obj ? obj.webcamPosition : undefined, "bottom-right")
+    webcamPosition = ["top-left", "top-right", "bottom-left", "bottom-right"].indexOf(pos) >= 0 ? pos : "bottom-right"
+    var size = stringValue(obj ? obj.webcamSize : undefined, "medium")
+    webcamSize = ["small", "medium", "large"].indexOf(size) >= 0 ? size : "medium"
     applying = false
     initialized = true
   }
@@ -82,6 +88,8 @@ Item {
   onRecordWebcamChanged: saveValue("webcam", recordWebcam ? "true" : "false")
   onMicrophoneDeviceChanged: saveValue("microphoneDevice", microphoneDevice)
   onWebcamDeviceChanged: saveValue("webcamDevice", webcamDevice)
+  onWebcamPositionChanged: saveValue("webcamPosition", webcamPosition)
+  onWebcamSizeChanged: saveValue("webcamSize", webcamSize)
 
   FileView {
     id: settingsFile
