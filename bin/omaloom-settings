@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""Safe persistence helper for Omaloom QML settings.
+
+The QML side calls this helper with an argv list (never through a shell).  This
+helper validates JSON, preserves defaults for absent/malformed fields, serializes
+with Python's json module, and writes via a same-directory temporary file followed
+by os.replace().  A flock prevents concurrent per-monitor widgets from losing
+independent setting changes.
+"""
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+import pathlib
+import sys
+import tempfile
+from typing import Any
+
+DEFAULTS: dict[str, Any] = {
+    "outputDirectory": str(pathlib.Path.home() / "Videos" / "Omaloom"),
+    "fullscreenCurrentMonitor": False,
+    "systemAudio": True,
+    "microphone": True,
+    "webcam": False,
+    "microphoneDevice": "",
+    "webcamDevice": "",
+}
+
+BOOL_KEYS = {"fullscreenCurrentMonitor", "systemAudio", "microphone", "webcam"}
+STRING_KEYS = {"outputDirectory", "microphoneDevice", "webcamDevice"}
+CONFIG_DIR = pathlib.Path.home() / ".config" / "omaloom"
+SETTINGS_PATH = CONFIG_DIR / "settings.json"
+LOCK_PATH = CONFIG_DIR / "settings.lock"
+
+
+def normalize(raw: Any) -> dict[str, Any]:
+    settings = dict(DEFAULTS)
+    if not isinstance(raw, dict):
+        return settings
+
+    value = raw.get("outputDirectory")
+    if isinstance(value, str) and value.strip():
+        settings["outputDirectory"] = value
+
+    for key in ("microphoneDevice", "webcamDevice"):
+        value = raw.get(key)
+        if isinstance(value, str):
+            settings[key] = value
+
+    for key in BOOL_KEYS:
+        value = raw.get(key)
+        if isinstance(value, bool):
+            settings[key] = value
+
+    return settings
+
+
+def read_settings_unlocked() -> dict[str, Any]:
+    try:
+        with SETTINGS_PATH.open("r", encoding="utf-8") as handle:
+            return normalize(json.load(handle))
+    except (FileNotFoundError, json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return dict(DEFAULTS)
+
+
+def write_settings_unlocked(settings: dict[str, Any]) -> None:
+    CONFIG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    payload = json.dumps(normalize(settings), indent=2, sort_keys=True) + "\n"
+    fd, tmp_name = tempfile.mkstemp(
+        prefix="settings.", suffix=".tmp", dir=str(CONFIG_DIR), text=True
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, SETTINGS_PATH)
+        dir_fd = os.open(CONFIG_DIR, os.O_DIRECTORY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    finally:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
+
+
+def parse_value(key: str, value: str) -> Any:
+    if key in BOOL_KEYS:
+        lowered = value.lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+        raise ValueError(f"{key} must be true or false")
+    if key == "outputDirectory":
+        if not value:
+            raise ValueError(f"{key} must not be empty")
+        return value
+    if key in STRING_KEYS:
+        return value
+    raise ValueError(f"unknown setting key: {key}")
+
+
+def with_lock(fn):
+    CONFIG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with LOCK_PATH.open("a", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        return fn()
+
+
+def cmd_load() -> int:
+    settings = with_lock(read_settings_unlocked)
+    print(json.dumps(settings, sort_keys=True))
+    return 0
+
+
+def cmd_set(argv: list[str]) -> int:
+    if len(argv) != 2:
+        print("usage: omaloom-settings set KEY VALUE", file=sys.stderr)
+        return 2
+    key, raw_value = argv
+    try:
+        parsed_value = parse_value(key, raw_value)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    def update() -> dict[str, Any]:
+        settings = read_settings_unlocked()
+        settings[key] = parsed_value
+        write_settings_unlocked(settings)
+        return settings
+
+    settings = with_lock(update)
+    print(json.dumps(settings, sort_keys=True))
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) < 2:
+        print("usage: omaloom-settings load|set ...", file=sys.stderr)
+        return 2
+    command = argv[1]
+    if command == "load":
+        return cmd_load()
+    if command == "set":
+        return cmd_set(argv[2:])
+    print(f"unknown command: {command}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

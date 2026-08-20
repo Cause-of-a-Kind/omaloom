@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""Geometry helpers for Omaloom recording guides."""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from typing import Any
+
+REGION_RE = re.compile(r"^region:(-?\d+)x(-?\d+)\+(-?\d+)\+(-?\d+)$")
+
+
+class GeometryError(RuntimeError):
+    pass
+
+
+def parse_region_target(target: str) -> dict[str, int]:
+    match = REGION_RE.match(target)
+    if not match:
+        raise GeometryError(f"not a region target: {target}")
+    width, height, x, y = (int(part) for part in match.groups())
+    if width <= 0 or height <= 0:
+        raise GeometryError(f"invalid region dimensions: {target}")
+    return {"x": x, "y": y, "width": width, "height": height}
+
+
+def intersect(a: dict[str, int], b: dict[str, int]) -> dict[str, int] | None:
+    left = max(a["x"], b["x"])
+    top = max(a["y"], b["y"])
+    right = min(a["x"] + a["width"], b["x"] + b["width"])
+    bottom = min(a["y"] + a["height"], b["y"] + b["height"])
+    if right <= left or bottom <= top:
+        return None
+    return {"x": left, "y": top, "width": right - left, "height": bottom - top}
+
+
+def normalized_monitors(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        raise GeometryError("monitor payload is not a list")
+    monitors: list[dict[str, Any]] = []
+    for monitor in raw:
+        if not isinstance(monitor, dict):
+            continue
+        name = str(monitor.get("name") or "")
+        if not name or monitor.get("disabled") is True:
+            continue
+        try:
+            x = int(monitor.get("x"))
+            y = int(monitor.get("y"))
+            physical_width = int(monitor.get("width"))
+            physical_height = int(monitor.get("height"))
+            scale = float(monitor.get("scale", 1) or 1)
+            transform = int(monitor.get("transform", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if physical_width <= 0 or physical_height <= 0 or scale <= 0:
+            continue
+        rotated = transform % 2 == 1
+        width = int((physical_height if rotated else physical_width) / scale)
+        height = int((physical_width if rotated else physical_height) / scale)
+        if width <= 0 or height <= 0:
+            continue
+        monitors.append({"name": name, "x": x, "y": y, "width": width, "height": height, "scale": scale})
+    return monitors
+
+
+def guide_for(target: str, monitors_json: str) -> dict[str, Any]:
+    region = parse_region_target(target)
+    monitors = normalized_monitors(json.loads(monitors_json))
+    relevant = []
+    for monitor in monitors:
+        hit = intersect(region, monitor)
+        if hit is not None:
+            relevant.append(monitor)
+    return {"target": target, "type": "region", "region": region, "monitors": relevant}
+
+
+def load_hyprctl_monitors() -> str:
+    return subprocess.check_output(["hyprctl", "monitors", "-j"], text=True)
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="Build Omaloom recording guide geometry")
+    sub = parser.add_subparsers(dest="command", required=True)
+    guide = sub.add_parser("guide")
+    guide.add_argument("target")
+    guide.add_argument("--monitors-json", default="")
+    args = parser.parse_args(argv[1:])
+
+    try:
+        if args.command == "guide":
+            monitors_json = args.monitors_json if args.monitors_json else load_hyprctl_monitors()
+            print(json.dumps(guide_for(args.target, monitors_json), sort_keys=True), flush=True)
+            return 0
+    except Exception as exc:
+        print(json.dumps({"error": str(exc)}, sort_keys=True), file=sys.stderr, flush=True)
+        return 2
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

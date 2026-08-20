@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Device discovery and lightweight setup-preview helpers for Omaloom."""
+from __future__ import annotations
+
+import json
+import math
+import re
+import shutil
+import signal
+import subprocess
+import sys
+from typing import Any
+
+
+def emit(obj: Any) -> None:
+    print(json.dumps(obj, sort_keys=True), flush=True)
+
+
+def list_microphones() -> int:
+    devices = [{"id": "default_input", "label": "Default microphone"}]
+    pactl = shutil.which("pactl")
+    if pactl:
+        try:
+            raw = subprocess.check_output(
+                [pactl, "--format=json", "list", "sources"], text=True, stderr=subprocess.DEVNULL
+            )
+            for source in json.loads(raw):
+                name = str(source.get("name", ""))
+                if not name or name.endswith(".monitor"):
+                    continue
+                label = str(source.get("description") or name)
+                devices.append({"id": name, "label": label})
+        except Exception:
+            pass
+    emit(devices)
+    return 0
+
+
+def list_webcams() -> int:
+    devices = []
+    cmd = shutil.which("omarchy-capture-webcam-list")
+    if cmd:
+        try:
+            raw = subprocess.check_output([cmd], text=True, stderr=subprocess.DEVNULL)
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split(None, 1)
+                device = parts[0]
+                if not device.startswith("/dev/video"):
+                    continue
+                label = parts[1].strip() if len(parts) > 1 else device
+                devices.append({"id": device, "label": label})
+        except Exception:
+            pass
+    if not devices:
+        v4l = shutil.which("v4l2-ctl")
+        if v4l:
+            try:
+                raw = subprocess.check_output([v4l, "--list-devices"], text=True, stderr=subprocess.DEVNULL)
+                current = ""
+                for line in raw.splitlines():
+                    if line and not line.startswith("\t"):
+                        current = line.rstrip(":")
+                    elif line.strip().startswith("/dev/video"):
+                        devices.append({"id": line.strip(), "label": current or line.strip()})
+            except Exception:
+                pass
+    emit(devices)
+    return 0
+
+
+def meter(device: str) -> int:
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return 1
+    if not device:
+        device = "default_input"
+
+    running = True
+
+    def stop(_signum, _frame):
+        nonlocal running
+        running = False
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+
+    pattern = re.compile(r"RMS level dB:\s*(-?inf|-?\d+(?:\.\d+)?)")
+    while running:
+        # ffmpeg's ametadata output can be block-buffered when read from QML.
+        # Short, argv-only samples provide reliable live levels while the setup
+        # popup is open and release the source promptly between samples.
+        proc = subprocess.run(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-nostdin",
+                "-f",
+                "pulse",
+                "-i",
+                device,
+                "-t",
+                "0.25",
+                "-vn",
+                "-af",
+                "astats=metadata=0:reset=0.25",
+                "-f",
+                "null",
+                "-",
+            ],
+            text=True,
+            capture_output=True,
+            timeout=2,
+        )
+        levels = pattern.findall(proc.stderr or "")
+        if not levels:
+            emit({"level": 0})
+            continue
+        value = levels[-1]
+        db = -90.0 if value in ("-inf", "inf") else float(value)
+        # Keep quiet but real microphone activity visible. A -60 dB floor made
+        # normal USB mic speech/noise collapse to zero and look frozen.
+        level = max(0.0, min(1.0, (db + 72.0) / 60.0))
+        emit({"level": round(math.sqrt(level), 3)})
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) < 2:
+        print("usage: omaloom-devices list-microphones|list-webcams|meter [DEVICE]", file=sys.stderr)
+        return 2
+    if argv[1] == "list-microphones":
+        return list_microphones()
+    if argv[1] == "list-webcams":
+        return list_webcams()
+    if argv[1] == "meter":
+        return meter(argv[2] if len(argv) > 2 else "default_input")
+    print(f"unknown command: {argv[1]}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

@@ -10,18 +10,11 @@ Item {
 
   readonly property string moduleName: "coak.omaloom"
   readonly property string home: Quickshell.env("HOME")
-  readonly property string defaultDirectory: home + "/Videos/Omaloom"
-  readonly property string settingsPath: home + "/.config/omaloom/settings.json"
   readonly property string installedRecorder: home + "/.config/omarchy/plugins/coak.omaloom/bin/omaloom-recorder"
 
   property string state: "idle"
   property string lastSavedPath: ""
   property string lastError: ""
-  property bool recordFullscreen: false
-  property bool recordMicrophone: true
-  property bool recordSystemAudio: true
-  property bool recordWebcam: false
-  property string outputDirectory: defaultDirectory
 
   function setState(nextState) {
     state = nextState
@@ -40,13 +33,18 @@ Item {
   function startRecording() {
     if (state === "recording" || state === "selecting" || startProcess.running) return
     lastError = ""
-    setState(recordFullscreen ? "recording" : "selecting")
-
-    var args = [recorderCommand(), "start", "--directory", outputDirectory]
-    if (recordFullscreen) args.push("--fullscreen")
-    if (recordSystemAudio) args.push("--desktop-audio")
-    if (recordMicrophone) args.push("--microphone")
-    if (recordWebcam) args.push("--webcam")
+    setState(omaloomSettings.recordFullscreen ? "recording" : "selecting")
+    var args = [recorderCommand(), "start", "--directory", omaloomSettings.outputDirectory]
+    if (omaloomSettings.recordFullscreen) args.push("--fullscreen")
+    if (omaloomSettings.recordSystemAudio) args.push("--desktop-audio")
+    if (omaloomSettings.recordMicrophone) {
+      args.push("--microphone")
+      if (omaloomSettings.microphoneDevice !== "") args.push("--microphone-device", omaloomSettings.microphoneDevice)
+    }
+    if (omaloomSettings.recordWebcam) {
+      args.push("--webcam")
+      if (omaloomSettings.webcamDevice !== "") args.push("--webcam-device", omaloomSettings.webcamDevice)
+    }
 
     startProcess.command = args
     startProcess.running = true
@@ -72,6 +70,8 @@ Item {
       setState("error")
     }
   }
+
+  OmaloomSettings { id: omaloomSettings }
 
   Component.onCompleted: refreshStatus()
 

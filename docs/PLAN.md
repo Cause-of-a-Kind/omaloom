@@ -51,12 +51,23 @@ Must have:
 - Save MP4 locally.
 - Show/copy/open/reveal the saved recording path.
 
-Confirmed in baseline:
+Confirmed through milestone 2:
 
 - Source selection before recording for non-fullscreen capture.
-- Visible 5-second countdown after source selection.
+- Visible 5-second countdown after source and webcam preparation.
+- Persistent output folder and capture settings.
+- Portal-backed output folder selection.
+- Microphone and webcam device selectors.
+- Setup-only live microphone waveform and webcam preview.
+- Region-aware webcam overlay placement.
+- Click-through, outside-only region recording guide.
 - `REC` indicator that does not reopen setup controls.
 - Stop through Omarchy's top-center recording control.
+
+Remaining must-have work:
+
+- Show/copy/open/reveal the saved recording path.
+- Clean install verification and publication documentation.
 
 Nice but optional for v1:
 
@@ -72,7 +83,7 @@ Not v1:
 - OAuth/keyring.
 - GStreamer compositor.
 - Annotations.
-- Custom source preview overlay.
+- Custom capture-source preview compositor.
 
 ## Architecture
 
@@ -96,10 +107,10 @@ Stop remains delegated to Omarchy:
 omarchy screenrecord --stop-recording
 ```
 
-The wrapper should expose a stable Omaloom interface:
+The wrapper exposes a stable Omaloom interface:
 
 ```bash
-omaloom-recorder start [--directory DIR] [--fullscreen] [--desktop-audio] [--microphone] [--webcam]
+omaloom-recorder start [--directory DIR] [--fullscreen] [--desktop-audio] [--microphone] [--microphone-device DEVICE] [--webcam] [--webcam-device DEVICE]
 omaloom-recorder stop
 omaloom-recorder status
 ```
@@ -136,15 +147,17 @@ Use:
 ~/Videos/Omaloom
 ```
 
-Initial settings:
+Persisted settings:
 
 ```json
 {
-  "defaultDirectory": "~/Videos/Omaloom",
-  "recordFullscreen": false,
-  "recordMicrophone": true,
-  "recordSystemAudio": true,
-  "recordWebcam": false
+  "outputDirectory": "~/Videos/Omaloom",
+  "fullscreenCurrentMonitor": false,
+  "systemAudio": true,
+  "microphone": true,
+  "microphoneDevice": "",
+  "webcam": false,
+  "webcamDevice": ""
 }
 ```
 

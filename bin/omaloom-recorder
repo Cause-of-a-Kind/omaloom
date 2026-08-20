@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -o pipefail
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 DEFAULT_DIR="$HOME/Videos/Omaloom"
 RECORDING_FILE="/tmp/omarchy-screenrecord-filename"
 REGION_FILE="${XDG_RUNTIME_DIR:-/tmp}/omarchy-screenrecord-region"
@@ -9,7 +10,7 @@ LOG_FILE=$([[ ${OMARCHY_SCREENRECORD_DEBUG:-false} == "true" ]] && echo "/tmp/om
 usage() {
   cat <<'USAGE'
 Usage:
-  omaloom-recorder start [--directory DIR] [--fullscreen] [--desktop-audio] [--microphone] [--webcam]
+  omaloom-recorder start [--directory DIR] [--fullscreen] [--desktop-audio] [--microphone] [--microphone-device DEVICE] [--webcam] [--webcam-device DEVICE]
   omaloom-recorder stop
   omaloom-recorder status
 USAGE
@@ -33,6 +34,20 @@ emit() {
     printf '{"event":"%s","%s":"%s"}\n' "$(json_escape "$event")" "$(json_escape "$key")" "$(json_escape "$value")"
   else
     printf '{"event":"%s"}\n' "$(json_escape "$event")"
+  fi
+}
+
+emit_recording_started() {
+  local path=$1
+  local target=${2-}
+  local guide=""
+  if [[ $target == region:* && -x "$SCRIPT_DIR/omaloom-geometry" ]]; then
+    guide=$("$SCRIPT_DIR/omaloom-geometry" guide "$target" 2>/dev/null || true)
+  fi
+  if [[ $guide == \{* ]]; then
+    printf '{"event":"recording_started","path":"%s","guide":%s}\n' "$(json_escape "$path")" "$guide"
+  else
+    printf '{"event":"recording_started","path":"%s"}\n' "$(json_escape "$path")"
   fi
 }
 
@@ -96,14 +111,23 @@ cleanup_webcam() {
   rm -f "$REGION_FILE"
 }
 
+microphone_available() {
+  local requested=${1-}
+  [[ -z $requested || $requested == default_input ]] && return 0
+  pactl --format=json list sources 2>/dev/null \
+    | jq -e --arg name "$requested" 'any(.[]; .name == $name and (.name | endswith(".monitor") | not))' >/dev/null 2>&1
+}
+
 start_webcam_overlay() {
   local target=${1-}
-  local webcam_device=""
+  local webcam_device=${2-}
   local webcam_size="medium"
 
   cleanup_webcam
 
-  webcam_device=$(omarchy-capture-webcam-list | sed -n '1s/[[:space:]].*//p')
+  if [[ -z $webcam_device || ! -e $webcam_device ]]; then
+    webcam_device=$(omarchy-capture-webcam-list | sed -n '1s/[[:space:]].*//p')
+  fi
   if [[ -z $webcam_device ]]; then
     emit error message "no webcam devices found"
     return 1
@@ -152,6 +176,8 @@ start_recording() {
   local desktop_audio=false
   local microphone_audio=false
   local webcam=false
+  local microphone_device=""
+  local webcam_device=""
 
   while (($#)); do
     case $1 in
@@ -164,7 +190,19 @@ start_recording() {
       --fullscreen) fullscreen=true ;;
       --desktop-audio) desktop_audio=true ;;
       --microphone) microphone_audio=true ;;
+      --microphone-device)
+        shift
+        [[ $# -gt 0 ]] || fail "--microphone-device requires a value"
+        microphone_device=$1
+        ;;
+      --microphone-device=*) microphone_device=${1#*=} ;;
       --webcam) webcam=true ;;
+      --webcam-device)
+        shift
+        [[ $# -gt 0 ]] || fail "--webcam-device requires a value"
+        webcam_device=$1
+        ;;
+      --webcam-device=*) webcam_device=${1#*=} ;;
       -h|--help) usage; exit 0 ;;
       *) fail "unknown start option: $1" ;;
     esac
@@ -187,11 +225,6 @@ start_recording() {
   fi
   emit source_selected target "$target"
 
-  countdown
-  emit starting
-  # Give Quickshell a moment to unmap the countdown popup before capture starts.
-  sleep 0.3
-
   local capture_args=()
   case $target in
     monitor:*) capture_args=(-w "${target#monitor:}" -s "$(default_resolution)") ;;
@@ -199,16 +232,27 @@ start_recording() {
     *) fail "unsupported capture target: $target" ;;
   esac
 
+  # Prepare and place the real mpv webcam overlay before the visible countdown.
+  # This keeps camera startup latency out of the gap between 1 and capture.
   if [[ $webcam == true ]]; then
-    start_webcam_overlay "$target" || exit 1
+    start_webcam_overlay "$target" "$webcam_device" || exit 1
   fi
+
+  countdown
+  emit starting
+  # Give Quickshell a moment to unmap the countdown popup before capture starts.
+  sleep 0.3
 
   local audio_devices=""
   local audio_args=()
+  if [[ $microphone_audio == true ]] && ! microphone_available "$microphone_device"; then
+    emit warning message "selected microphone is unavailable; using default input"
+    microphone_device=""
+  fi
   [[ $desktop_audio == true ]] && audio_devices+="default_output"
   if [[ $microphone_audio == true ]]; then
     [[ -n $audio_devices ]] && audio_devices+="|"
-    audio_devices+="default_input"
+    audio_devices+="${microphone_device:-default_input}"
   fi
   [[ -n $audio_devices ]] && audio_args+=(-a "$audio_devices" -ac aac)
 
@@ -224,7 +268,7 @@ start_recording() {
   if kill -0 "$pid" 2>/dev/null; then
     echo "$filename" >"$RECORDING_FILE"
     toggle_screenrecording_indicator
-    emit recording_started path "$filename"
+    emit_recording_started "$filename" "$target"
   else
     cleanup_webcam
     fail "recording process exited before creating output"

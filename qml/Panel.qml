@@ -20,12 +20,7 @@ Panel {
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
 
   property string state: "idle"
-  property string outputDirectory: home + "/Videos/Omaloom"
   property string lastMessage: "Ready to record locally."
-  property bool recordFullscreen: false
-  property bool recordMicrophone: true
-  property bool recordSystemAudio: true
-  property bool recordWebcam: false
 
   function open(payloadJson) {
     root.controller.show()
@@ -47,12 +42,18 @@ Panel {
   }
 
   function startRecording() {
-    var args = [recorderCommand(), "start", "--directory", outputDirectory]
-    if (recordFullscreen) args.push("--fullscreen")
-    if (recordSystemAudio) args.push("--desktop-audio")
-    if (recordMicrophone) args.push("--microphone")
-    if (recordWebcam) args.push("--webcam")
-    state = recordFullscreen ? "recording" : "selecting"
+    var args = [recorderCommand(), "start", "--directory", omaloomSettings.outputDirectory]
+    if (omaloomSettings.recordFullscreen) args.push("--fullscreen")
+    if (omaloomSettings.recordSystemAudio) args.push("--desktop-audio")
+    if (omaloomSettings.recordMicrophone) {
+      args.push("--microphone")
+      if (omaloomSettings.microphoneDevice !== "") args.push("--microphone-device", omaloomSettings.microphoneDevice)
+    }
+    if (omaloomSettings.recordWebcam) {
+      args.push("--webcam")
+      if (omaloomSettings.webcamDevice !== "") args.push("--webcam-device", omaloomSettings.webcamDevice)
+    }
+    state = omaloomSettings.recordFullscreen ? "recording" : "selecting"
     actionProcess.command = args
     actionProcess.running = true
   }
@@ -72,6 +73,8 @@ Panel {
     else if (text.indexOf('"state":"idle"') !== -1) state = "idle"
     else if (text.indexOf('"error"') !== -1) state = "error"
   }
+
+  OmaloomSettings { id: omaloomSettings }
 
   Process {
     id: statusProcess
@@ -121,7 +124,7 @@ Panel {
 
         Text {
           width: parent.width
-          text: "Folder: " + root.outputDirectory
+          text: "Folder: " + omaloomSettings.outputDirectory
           color: Qt.darker(root.contentForeground, 1.35)
           font.family: root.contentFontFamily
           font.pixelSize: Style.font.bodySmall
