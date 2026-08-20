@@ -16,6 +16,10 @@
 
 Omaloom (`coak.omaloom`) is a Cause of a Kind Omarchy plugin for fast local MP4 screen recordings. It wraps Omarchy's existing capture stack instead of replacing it: source selection, countdown, recording, stop/finalization, notifications, and webcam cleanup stay compatible with Omarchy.
 
+<p align="center">
+  <img src="preview.png" alt="Omaloom recording dashboard with capture controls, webcam composition preview, and local MP4 library" width="960">
+</p>
+
 ## Features
 
 - Region or current-monitor/fullscreen capture.
