@@ -110,6 +110,7 @@ Panel {
         spacing: Style.space(10)
 
         Text {
+          textFormat: Text.PlainText
           text: "Omaloom"
           color: root.contentForeground
           font.family: root.contentFontFamily
@@ -118,6 +119,7 @@ Panel {
         }
 
         Text {
+          textFormat: Text.PlainText
           text: "State: " + root.state
           color: root.contentForeground
           font.family: root.contentFontFamily
@@ -125,6 +127,7 @@ Panel {
         }
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           text: "Folder: " + omaloomSettings.outputDirectory
           color: Qt.darker(root.contentForeground, 1.35)
@@ -134,6 +137,7 @@ Panel {
         }
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           text: root.lastMessage
           color: Qt.darker(root.contentForeground, 1.6)

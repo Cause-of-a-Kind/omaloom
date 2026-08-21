@@ -654,6 +654,7 @@ Panel {
     onPressed: function(mouseButton) { root.triggerPress(mouseButton) }
 
     Text {
+      textFormat: Text.PlainText
       visible: root.bar && root.bar.vertical === true
       anchors.centerIn: parent
       text: root.countdown ? String(root.countdownRemaining) : (root.starting ? "▶" : (root.recording ? "●" : "󰿎"))
@@ -687,6 +688,7 @@ Panel {
         spacing: Style.space(14)
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           text: "Recording starts in"
           color: root.contentForeground
@@ -697,6 +699,7 @@ Panel {
         }
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           text: String(root.countdownRemaining)
           color: Color.accent
@@ -707,6 +710,7 @@ Panel {
         }
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           text: "Keep the selected area clear. Recording begins after countdown."
           color: Qt.darker(root.contentForeground, 1.45)
@@ -734,6 +738,7 @@ Panel {
             spacing: Style.space(2)
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               text: "Omaloom"
               color: root.contentForeground
@@ -743,6 +748,7 @@ Panel {
             }
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               text: root.recording ? "Recording" : (root.preparing ? "Preparing…" : (root.starting ? "Starting…" : "Local screen recording"))
               color: Qt.darker(root.contentForeground, 1.35)
@@ -753,6 +759,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             id: statusText
             anchors.verticalCenter: parent.verticalCenter
             text: root.recording ? "REC" : (root.preparing ? "PREP" : (root.starting ? "GO" : (root.recordingsLoading ? "SYNC" : "READY")))
@@ -823,6 +830,7 @@ Panel {
     spacing: Style.space(10)
 
     Text {
+      textFormat: Text.PlainText
       width: parent.width
       text: "RECORD"
       color: root.contentForeground
@@ -945,7 +953,7 @@ Panel {
       height: visible ? Style.space(20) : 0
 
       Rectangle { anchors.left: parent.left; anchors.right: previewLabel.left; anchors.rightMargin: Style.space(8); anchors.verticalCenter: parent.verticalCenter; height: 1; color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.22) }
-      Text { id: previewLabel; anchors.horizontalCenter: parent.horizontalCenter; anchors.verticalCenter: parent.verticalCenter; text: "REPRESENTATIVE PREVIEW"; color: Qt.darker(root.contentForeground, 1.45); font.family: root.contentFontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+      Text { textFormat: Text.PlainText; id: previewLabel; anchors.horizontalCenter: parent.horizontalCenter; anchors.verticalCenter: parent.verticalCenter; text: "REPRESENTATIVE PREVIEW"; color: Qt.darker(root.contentForeground, 1.45); font.family: root.contentFontFamily; font.pixelSize: Style.font.caption; font.bold: true }
       Rectangle { anchors.left: previewLabel.right; anchors.leftMargin: Style.space(8); anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; height: 1; color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.22) }
     }
 
@@ -971,6 +979,7 @@ Panel {
       }
 
       Text {
+        textFormat: Text.PlainText
         anchors.left: parent.left
         anchors.leftMargin: Style.space(10)
         anchors.top: parent.top
@@ -1009,7 +1018,7 @@ Panel {
           }
         }
 
-        Text { anchors.centerIn: parent; width: parent.width - Style.space(8); text: root.webcamDevices.length === 0 ? "No camera" : "Camera"; visible: !root.previewActive; color: Qt.darker(root.contentForeground, 1.45); font.family: root.contentFontFamily; font.pixelSize: Style.font.caption; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap }
+        Text { textFormat: Text.PlainText; anchors.centerIn: parent; width: parent.width - Style.space(8); text: root.webcamDevices.length === 0 ? "No camera" : "Camera"; visible: !root.previewActive; color: Qt.darker(root.contentForeground, 1.45); font.family: root.contentFontFamily; font.pixelSize: Style.font.caption; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap }
       }
     }
 
@@ -1025,6 +1034,7 @@ Panel {
     Item { width: parent.width; height: Style.space(4) }
 
     Text {
+      textFormat: Text.PlainText
       width: parent.width
       text: root.lastMessage
       color: Qt.darker(root.contentForeground, 1.6)
@@ -1055,6 +1065,7 @@ Panel {
       spacing: Style.space(8)
 
       Text {
+        textFormat: Text.PlainText
         id: libraryTitle
         width: parent.width - countText.width - parent.spacing
         text: "LIBRARY"
@@ -1065,6 +1076,7 @@ Panel {
       }
 
       Text {
+        textFormat: Text.PlainText
         id: countText
         text: root.recordingsLoading ? "…" : (root.recordings.length + " MP4" + (root.recordings.length === 1 ? "" : "s"))
         color: Qt.darker(root.contentForeground, 1.45)
@@ -1074,6 +1086,7 @@ Panel {
     }
 
     Text {
+      textFormat: Text.PlainText
       visible: !root.busy && (root.recordingsLoading || root.recordingsError !== "" || root.actionFeedback !== "")
       width: parent.width - libraryColumn.contentRightInset
       text: root.recordingsLoading ? "Loading recordings…" : (root.actionFeedback !== "" ? root.actionFeedback : root.recordingsError)
@@ -1093,6 +1106,7 @@ Panel {
       border.color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.12)
 
       Text {
+        textFormat: Text.PlainText
         anchors.centerIn: parent
         width: parent.width - Style.space(24)
         text: "No MP4 recordings found in the selected folder."
@@ -1135,6 +1149,7 @@ Panel {
     border.color: selected ? Color.accent : Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.18)
 
     Text {
+      textFormat: Text.PlainText
       anchors.centerIn: parent
       text: tabRoot.label
       color: root.contentForeground
@@ -1163,6 +1178,7 @@ Panel {
     opacity: enabled ? 1 : 0.55
 
     Text {
+      textFormat: Text.PlainText
       id: labelText
       anchors.centerIn: parent
       text: miniRoot.label
@@ -1189,6 +1205,7 @@ Panel {
     border.color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.11)
 
     Text {
+      textFormat: Text.PlainText
       anchors.left: parent.left
       anchors.leftMargin: Style.space(8)
       anchors.right: actionRow.left
@@ -1203,6 +1220,7 @@ Panel {
     }
 
     Text {
+      textFormat: Text.PlainText
       anchors.left: parent.left
       anchors.leftMargin: Style.space(8)
       anchors.right: actionRow.left
@@ -1259,6 +1277,7 @@ Panel {
         spacing: Style.space(8)
 
         Text {
+          textFormat: Text.PlainText
           anchors.verticalCenter: parent.verticalCenter
           width: Style.space(78)
           text: selectorRoot.label
@@ -1269,6 +1288,7 @@ Panel {
         }
 
         Text {
+          textFormat: Text.PlainText
           anchors.verticalCenter: parent.verticalCenter
           width: parent.width - Style.space(108)
           text: selectorRoot.value
@@ -1279,6 +1299,7 @@ Panel {
         }
 
         Text {
+          textFormat: Text.PlainText
           anchors.verticalCenter: parent.verticalCenter
           text: "›"
           color: selectorRoot.enabled ? root.contentForeground : Qt.darker(root.contentForeground, 1.8)
@@ -1305,6 +1326,7 @@ Panel {
     implicitHeight: Style.space(26)
 
     Text {
+      textFormat: Text.PlainText
       anchors.left: parent.left
       anchors.leftMargin: Style.space(22)
       anchors.right: parent.right
@@ -1370,6 +1392,7 @@ Panel {
       }
 
       Text {
+        textFormat: Text.PlainText
         id: micLiveLabel
         anchors.right: parent.right
         anchors.rightMargin: Style.space(10)
@@ -1403,6 +1426,7 @@ Panel {
         border.color: toggleRoot.enabled ? root.contentForeground : Qt.darker(root.contentForeground, 1.8)
 
         Text {
+          textFormat: Text.PlainText
           anchors.centerIn: parent
           text: toggleRoot.checked ? "✓" : ""
           color: Color.background
@@ -1413,6 +1437,7 @@ Panel {
       }
 
       Text {
+        textFormat: Text.PlainText
         anchors.verticalCenter: parent.verticalCenter
         text: toggleRoot.label
         color: toggleRoot.enabled ? root.contentForeground : Qt.darker(root.contentForeground, 1.8)
@@ -1442,6 +1467,7 @@ Panel {
     opacity: enabled ? 1 : 0.55
 
     Text {
+      textFormat: Text.PlainText
       anchors.centerIn: parent
       text: actionRoot.label
       color: root.contentForeground
