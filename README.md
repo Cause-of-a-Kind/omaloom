@@ -117,7 +117,7 @@ Omaloom is designed for Omarchy Quattro/Quickshell on Wayland. Stock Omarchy sup
 - `gpu-screen-recorder`
 - `omarchy-capture-region`, `omarchy-capture-webcam-list`, `omarchy-capture-webcam-resize`
 - `hyprctl`, `jq`
-- `mpv` and `v4l2-ctl` for webcam overlay support
+- `mpv`, `v4l2-ctl`, and `fuser` (from `psmisc`) for webcam overlay support and occupied-device detection
 - `pactl` and `ffmpeg` for input discovery/metering
 - `wl-copy` for Copy path
 - xdg-desktop-portal `org.freedesktop.portal.FileChooser` for folder picking
@@ -174,8 +174,17 @@ omarchy restart shell
 omarchy-shell shell ping
 ```
 
+## Troubleshooting
+
+### Webcam says it is already in use
+
+Omaloom's recording overlay opens the selected camera directly through V4L2/mpv. Most physical `/dev/video*` cameras cannot be shared by Chromium, video calls, OBS, and Omaloom at the same time. If another app already owns the camera, Omaloom now stops before countdown and reports `camera is already in use by another application`; it does not kill or interrupt the other app.
+
+Close the other camera app before recording, or route your camera through OBS/another virtual camera and select that virtual device in Omaloom when you need simultaneous use.
+
 ## Current limitations
 
+- Physical V4L2 cameras are generally exclusive-use; use a virtual camera for simultaneous apps.
 - Stop is intentionally delegated to Omarchy's top-center recording control.
 - Library actions are local file actions only; there is no delete/rename/share UI.
 - Recordings are listed from the currently selected output folder only.

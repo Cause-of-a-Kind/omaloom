@@ -1,0 +1,47 @@
+#!/usr/bin/python3
+"""Classify Omaloom webcam overlay startup failures."""
+from __future__ import annotations
+
+import pathlib
+import re
+import sys
+
+BUSY_PATTERNS = [
+    re.compile(r"device or resource busy", re.I),
+    re.compile(r"resource busy", re.I),
+    re.compile(r"resource temporarily unavailable", re.I),
+    re.compile(r"device .* busy", re.I),
+    re.compile(r"already in use", re.I),
+]
+
+OPEN_FAILURE_PATTERNS = [
+    re.compile(r"cannot open", re.I),
+    re.compile(r"failed to open", re.I),
+    re.compile(r"no such file", re.I),
+    re.compile(r"permission denied", re.I),
+    re.compile(r"inappropriate ioctl for device", re.I),
+]
+
+
+def message_for_log(text: str) -> str:
+    if any(pattern.search(text) for pattern in BUSY_PATTERNS):
+        return "camera is already in use by another application"
+    if any(pattern.search(text) for pattern in OPEN_FAILURE_PATTERNS):
+        return "unable to start webcam overlay; camera could not be opened"
+    return "unable to start webcam overlay"
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 2:
+        print("usage: omaloom-webcam-diagnose LOG", file=sys.stderr)
+        return 2
+    try:
+        text = pathlib.Path(argv[1]).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        text = ""
+    print(message_for_log(text))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

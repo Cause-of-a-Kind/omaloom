@@ -2,6 +2,15 @@
 
 All notable changes to Omaloom are documented here.
 
+## 0.1.2 — 2026-08-21
+
+### Fixed
+
+- Harden webcam overlay startup when the selected V4L2 camera is already owned by another application.
+- Capture mpv webcam startup stderr to a private runtime log, detect busy/in-use failures, and surface a clear structured error instead of silently continuing to countdown.
+- Require a live mapped `WebcamOverlay` before resize, placement, and countdown.
+- Clean temporary webcam logs and overlay/region state on failure without touching the application that owns the camera.
+
 ## 0.1.1 — 2026-08-21
 
 ### Security

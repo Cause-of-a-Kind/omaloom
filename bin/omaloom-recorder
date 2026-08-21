@@ -138,6 +138,21 @@ start_webcam_overlay() {
     return 1
   fi
 
+  # Direct V4L2 capture is normally exclusive. Give the setup preview a brief
+  # chance to release the device, then fail clearly rather than launching a
+  # mapped-but-empty mpv window when another application still owns it.
+  if command -v fuser >/dev/null 2>&1; then
+    local owner_waited=0
+    while ((owner_waited < 20)) && fuser "$webcam_device" >/dev/null 2>&1; do
+      sleep 0.05
+      owner_waited=$((owner_waited + 1))
+    done
+    if fuser "$webcam_device" >/dev/null 2>&1; then
+      emit error message "camera is already in use by another application"
+      return 1
+    fi
+  fi
+
   local preferred_resolutions=("640x360" "1280x720" "1920x1080")
   local capture_options="framerate=30"
   local available_formats=""
@@ -151,19 +166,47 @@ start_webcam_overlay() {
     fi
   done
 
+  local webcam_log=""
+  webcam_log=$(mktemp "${XDG_RUNTIME_DIR:-/tmp}/omaloom-webcam.XXXXXX.log") || {
+    emit error message "unable to create webcam startup log"
+    return 1
+  }
+  chmod 600 "$webcam_log" 2>/dev/null || true
+
   mpv "av://v4l2:$webcam_device" \
     --profile=low-latency --untimed --no-cache \
     --demuxer-lavf-o="$capture_options" \
     '--vf=lavfi=[crop=ih*8/9:ih]' \
     --title="WebcamOverlay" --wayland-app-id="WebcamOverlay-$webcam_size" \
     --no-border --no-audio --no-osc --osd-level=0 \
-    --really-quiet &>/dev/null &
+    --msg-level=all=warn >"$webcam_log" 2>&1 &
+  local webcam_pid=$!
 
   local waited=0
-  while ((waited < 40)) && ! hyprctl clients -j | jq -e 'any(.[]; .title == "WebcamOverlay")' >/dev/null 2>&1; do
+  local mapped=false
+  while ((waited < 40)); do
+    if hyprctl clients -j | jq -e 'any(.[]; .title == "WebcamOverlay")' >/dev/null 2>&1; then
+      mapped=true
+      break
+    fi
+    if ! kill -0 "$webcam_pid" 2>/dev/null; then
+      break
+    fi
     sleep 0.05
     waited=$((waited + 1))
   done
+
+  if [[ $mapped != true ]] || ! kill -0 "$webcam_pid" 2>/dev/null; then
+    local message="unable to start webcam overlay"
+    if [[ -x "$SCRIPT_DIR/omaloom-webcam-diagnose" ]]; then
+      message=$("$SCRIPT_DIR/omaloom-webcam-diagnose" "$webcam_log" 2>/dev/null || printf '%s' "$message")
+    fi
+    kill "$webcam_pid" 2>/dev/null || true
+    cleanup_webcam
+    rm -f "$webcam_log"
+    emit error message "$message"
+    return 1
+  fi
 
   [[ $target == region:* ]] && echo "${target#region:}" >"$REGION_FILE"
   omarchy-capture-webcam-resize "$webcam_size"
@@ -172,6 +215,19 @@ start_webcam_overlay() {
   fi
 
   sleep 1
+  if ! hyprctl clients -j | jq -e 'any(.[]; .title == "WebcamOverlay")' >/dev/null 2>&1 || ! kill -0 "$webcam_pid" 2>/dev/null; then
+    local message="unable to start webcam overlay"
+    if [[ -x "$SCRIPT_DIR/omaloom-webcam-diagnose" ]]; then
+      message=$("$SCRIPT_DIR/omaloom-webcam-diagnose" "$webcam_log" 2>/dev/null || printf '%s' "$message")
+    fi
+    kill "$webcam_pid" 2>/dev/null || true
+    cleanup_webcam
+    rm -f "$webcam_log"
+    emit error message "$message"
+    return 1
+  fi
+
+  rm -f "$webcam_log"
 }
 
 toggle_screenrecording_indicator() {
