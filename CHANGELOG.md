@@ -2,6 +2,13 @@
 
 All notable changes to Omaloom are documented here.
 
+## 0.1.1 — 2026-08-21
+
+### Security
+
+- Force `Text.PlainText` on every QML text surface so crafted device names, paths, filenames, and backend feedback cannot trigger Qt rich-text resource loading.
+- Add a regression test requiring plain-text enforcement for every future QML `Text` item.
+
 ## 0.1.0 — 2026-08-20
 
 Initial public release.
