@@ -1,0 +1,111 @@
+#!/usr/bin/python3
+"""Securely reserve Omaloom recording output paths."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pathlib
+import secrets
+import stat
+import sys
+import time
+
+class OutputError(RuntimeError):
+    pass
+
+def is_cross_user_writable_nonsticky(st: os.stat_result) -> bool:
+    return bool((st.st_mode & (stat.S_IWGRP | stat.S_IWOTH)) and not (st.st_mode & stat.S_ISVTX))
+
+def validate_directory(directory_arg: str) -> pathlib.Path:
+    path = pathlib.Path(directory_arg).expanduser().resolve(strict=True)
+    if not path.is_dir():
+        raise OutputError("output directory is not a directory")
+    uid = os.getuid()
+    cur = path
+    seen = []
+    while True:
+        seen.append(cur)
+        if cur.parent == cur:
+            break
+        cur = cur.parent
+    for component in seen:
+        st = os.lstat(component)
+        if not stat.S_ISDIR(st.st_mode):
+            raise OutputError(f"unsafe output path component is not a directory: {component}")
+        if is_cross_user_writable_nonsticky(st):
+            raise OutputError(f"unsafe writable output path component: {component}")
+    final = os.lstat(path)
+    if final.st_uid != uid:
+        raise OutputError("output directory must be owned by the current user")
+    if final.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise OutputError("output directory must not be group/world writable")
+    return path
+
+def reserve(directory_arg: str, prefix: str = "screenrecording") -> int:
+    directory = validate_directory(directory_arg)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    before = os.lstat(directory)
+    dir_fd = os.open(
+        directory,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+    )
+    try:
+        after = os.fstat(dir_fd)
+        if (before.st_dev, before.st_ino, before.st_uid, stat.S_IFMT(before.st_mode)) != (after.st_dev, after.st_ino, after.st_uid, stat.S_IFDIR):
+            raise OutputError("output directory changed while opening")
+        for _ in range(128):
+            stamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+            name = f"{prefix}-{stamp}-{secrets.token_hex(6)}.mp4"
+            try:
+                fd = os.open(name, flags, 0o600, dir_fd=dir_fd)
+            except FileExistsError:
+                continue
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            print(str(directory / name), flush=True)
+            return 0
+    finally:
+        os.close(dir_fd)
+    raise OutputError("could not reserve a unique output path")
+
+def validate_reserved(path_arg: str) -> pathlib.Path:
+    path = pathlib.Path(path_arg).expanduser().absolute()
+    st = os.lstat(path)
+    if stat.S_ISLNK(st.st_mode):
+        raise OutputError("reserved output is a symlink")
+    if not stat.S_ISREG(st.st_mode):
+        raise OutputError("reserved output is not a regular file")
+    if st.st_uid != os.getuid():
+        raise OutputError("reserved output is owned by another user")
+    if st.st_nlink != 1:
+        raise OutputError("reserved output has multiple hard links")
+    return path
+
+def remove(path_arg: str) -> int:
+    path = validate_reserved(path_arg)
+    os.unlink(path)
+    return 0
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command", required=True)
+    r = sub.add_parser("reserve")
+    r.add_argument("directory")
+    rm = sub.add_parser("remove")
+    rm.add_argument("path")
+    args = parser.parse_args(argv[1:])
+    try:
+        if args.command == "reserve":
+            return reserve(args.directory)
+        if args.command == "remove":
+            return remove(args.path)
+    except Exception as exc:
+        print(json.dumps({"error": str(exc)}, sort_keys=True), file=sys.stderr)
+        return 2
+    return 2
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

@@ -2,6 +2,19 @@
 
 All notable changes to Omaloom are documented here.
 
+## 0.1.3 — 2026-08-21
+
+### Security
+
+- Replace shell writes to predictable `/tmp/omarchy-screenrecord-filename` with a stdlib Python helper that validates ownership/type without following links and atomically reserves the fixed path mode `0600`.
+- Preserve compatibility with Omarchy's stock top-center stop control while rejecting symlinks, FIFOs, unsafe ownership, hard-linked state files, and race replacement.
+- Reserve unpredictable MP4 output paths with a stdlib Python helper in owner-only selected directories, rejecting unsafe group/world-writable output locations.
+- Move debug/region/webcam PID state under a validated private per-user runtime directory and track only Omaloom's own validated mpv webcam overlay PID instead of broad process-name cleanup.
+- Use a controlled command search path for recorder/helper subprocesses and fail closed when required commands are not found there, while retaining explicit development test overrides.
+- Install idempotent startup cleanup traps before source selection/webcam/countdown so interrupted starts clean unretained webcam/output/state artifacts.
+- Add proactive setup-time camera availability checks with inline busy warnings before Start while preserving backend ownership checks for races.
+- Ignore symbolic links while scanning the selected recording library and reject symlink cleanup targets.
+
 ## 0.1.2 — 2026-08-21
 
 ### Fixed

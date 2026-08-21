@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 from typing import Any
 
 REGION_RE = re.compile(r"^region:(-?\d+)x(-?\d+)\+(-?\d+)\+(-?\d+)$")
+CONTROLLED_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/share/omarchy/bin"
 
 
 class GeometryError(RuntimeError):
@@ -84,8 +86,15 @@ def source_selected_event(target: str, monitors_json: str) -> dict[str, Any]:
     return event
 
 
+def controlled_command(command: str) -> str:
+    resolved = shutil.which(command, path=CONTROLLED_PATH)
+    if not resolved:
+        raise GeometryError(f"required command not found in controlled PATH: {command}")
+    return resolved
+
+
 def load_hyprctl_monitors() -> str:
-    return subprocess.check_output(["hyprctl", "monitors", "-j"], text=True)
+    return subprocess.check_output([controlled_command("hyprctl"), "monitors", "-j"], text=True)
 
 
 def main(argv: list[str]) -> int:

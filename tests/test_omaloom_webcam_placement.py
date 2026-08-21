@@ -60,10 +60,25 @@ def test_dispatch_prefers_omarchy_lua_commands():
     finally:
         module.subprocess.run = original_run
 
+    hyprctl = module.which("hyprctl")
     assert calls == [
-        ["hyprctl", "dispatch", 'hl.dsp.window.resize({ window = "address:0xabc123", x = 160, y = 180 })'],
-        ["hyprctl", "dispatch", 'hl.dsp.window.move({ window = "address:0xabc123", x = -120, y = 50 })'],
+        [hyprctl, "dispatch", 'hl.dsp.window.resize({ window = "address:0xabc123", x = 160, y = 180 })'],
+        [hyprctl, "dispatch", 'hl.dsp.window.move({ window = "address:0xabc123", x = -120, y = 50 })'],
     ]
+
+
+def test_controlled_path_fails_closed_for_hyprctl_lookup():
+    original = module.shutil.which
+    module.shutil.which = lambda command, path=None: None
+    try:
+        try:
+            module.which("hyprctl")
+        except module.PlacementError as exc:
+            assert "controlled PATH" in str(exc)
+        else:
+            raise AssertionError("bare hyprctl fallback should not be used")
+    finally:
+        module.shutil.which = original
 
 
 def test_cli_compute_json():
@@ -82,5 +97,6 @@ if __name__ == "__main__":
     test_size_ladder_matches_omarchy_anchor_height()
     test_compute_region_negative_and_monitor_scaled_rotated()
     test_dispatch_prefers_omarchy_lua_commands()
+    test_controlled_path_fails_closed_for_hyprctl_lookup()
     test_cli_compute_json()
     print("webcam placement tests passed")

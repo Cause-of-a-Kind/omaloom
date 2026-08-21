@@ -51,6 +51,7 @@ def test_list_empty_missing_ordering_limit_and_special_names():
         touch(root / "middle.mp4", "cc", now - 10)
         touch(root / "ignore.txt", "no", now + 100)
         (root / "sub.mp4").mkdir()
+        (root / "linked.mp4").symlink_to(root / "old.mp4")
 
         payload = json.loads(run("list", "--directory", str(root), "--limit", "2").stdout)
         assert [item["name"] for item in payload["recordings"]] == ["new space ☃.MP4", "middle.mp4"]
@@ -107,7 +108,7 @@ def test_reveal_falls_back_to_fake_opener_argv_and_parent_path():
         proc = run(
             "reveal",
             str(video),
-            env={"OMALOOM_REVEAL_COMMAND": str(revealer), "PATH": str(root) + os.pathsep + os.environ.get("PATH", "")},
+            env={"OMALOOM_REVEAL_COMMAND": str(revealer), "OMALOOM_SKIP_FILEMANAGER1": "1", "PATH": str(root) + os.pathsep + os.environ.get("PATH", "")},
         )
         assert json.loads(proc.stdout)["ok"] is True
         assert json.loads(wait_for_text(output)) == [str(revealer), str(video_dir.resolve())]

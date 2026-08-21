@@ -1,11 +1,31 @@
 #!/usr/bin/env bash
 set -o pipefail
 
+export PATH="/usr/local/bin:/usr/bin:/bin:/usr/share/omarchy/bin"
+
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 DEFAULT_DIR="$HOME/Videos/Omaloom"
 RECORDING_FILE="/tmp/omarchy-screenrecord-filename"
-REGION_FILE="${XDG_RUNTIME_DIR:-/tmp}/omarchy-screenrecord-region"
-LOG_FILE=$([[ ${OMARCHY_SCREENRECORD_DEBUG:-false} == "true" ]] && echo "/tmp/omarchy-screenrecord.log" || echo "/dev/null")
+STATE_HELPER="$SCRIPT_DIR/omaloom-state"
+OUTPUT_HELPER="$SCRIPT_DIR/omaloom-output"
+RUNTIME_HELPER="$SCRIPT_DIR/omaloom-runtime"
+STATE_RESERVED=false
+STATE_RETAIN=false
+OUTPUT_RESERVED=""
+WEBCAM_PID=""
+WEBCAM_RETAIN=false
+WEBCAM_PID_FILE=""
+
+runtime_dir() {
+  [[ -x $RUNTIME_HELPER ]] || return 1
+  "$RUNTIME_HELPER" select
+}
+
+RUNTIME_DIR=$(runtime_dir 2>/dev/null || true)
+[[ -n $RUNTIME_DIR ]] && export XDG_RUNTIME_DIR="$RUNTIME_DIR"
+REGION_FILE=$([[ -n $RUNTIME_DIR ]] && echo "$RUNTIME_DIR/omarchy-screenrecord-region" || echo "")
+WEBCAM_PID_FILE=$([[ -n $RUNTIME_DIR ]] && echo "$RUNTIME_DIR/omaloom-webcam.pid" || echo "")
+LOG_FILE=$([[ ${OMARCHY_SCREENRECORD_DEBUG:-false} == "true" && -n $RUNTIME_DIR ]] && echo "$RUNTIME_DIR/omaloom-screenrecord.log" || echo "/dev/null")
 
 usage() {
   cat <<'USAGE'
@@ -60,8 +80,47 @@ fail() {
   exit 1
 }
 
+state_reserve() {
+  [[ -x $STATE_HELPER ]] || return 1
+  "$STATE_HELPER" reserve "$RECORDING_FILE" "$1" || return 1
+  STATE_RESERVED=true
+  STATE_RETAIN=false
+}
+
+state_read() {
+  [[ -x $STATE_HELPER ]] || return 1
+  "$STATE_HELPER" read "$RECORDING_FILE"
+}
+
+state_remove_if_owned() {
+  [[ -x $STATE_HELPER ]] || return 0
+  "$STATE_HELPER" remove "$RECORDING_FILE" >/dev/null 2>&1 || true
+}
+
+output_reserve() {
+  [[ -x $OUTPUT_HELPER ]] || return 1
+  "$OUTPUT_HELPER" reserve "$1"
+}
+
+output_remove_if_owned() {
+  [[ -n ${1-} && -x $OUTPUT_HELPER ]] || return 0
+  "$OUTPUT_HELPER" remove "$1" >/dev/null 2>&1 || true
+}
+
+cleanup_start_on_exit() {
+  if [[ $WEBCAM_RETAIN != true ]]; then
+    cleanup_webcam
+  fi
+  if [[ $STATE_RESERVED == true && $STATE_RETAIN != true ]]; then
+    state_remove_if_owned
+  fi
+  if [[ -n $OUTPUT_RESERVED && $STATE_RETAIN != true ]]; then
+    output_remove_if_owned "$OUTPUT_RESERVED"
+  fi
+}
+
 is_recording() {
-  pgrep -f '^gpu-screen-recorder' >/dev/null 2>&1
+  pgrep -u "$UID" -f '^gpu-screen-recorder' >/dev/null 2>&1
 }
 
 expand_dir() {
@@ -111,8 +170,11 @@ countdown() {
 }
 
 cleanup_webcam() {
-  pkill -f 'WebcamOverlay' 2>/dev/null
-  rm -f "$REGION_FILE"
+  if [[ -x $RUNTIME_HELPER && -n $WEBCAM_PID_FILE ]]; then
+    "$RUNTIME_HELPER" signal-remove "$WEBCAM_PID_FILE" >/dev/null 2>&1 || true
+    "$RUNTIME_HELPER" remove "$WEBCAM_PID_FILE" >/dev/null 2>&1 || true
+  fi
+  [[ -n $REGION_FILE ]] && rm -f "$REGION_FILE"
 }
 
 microphone_available() {
@@ -167,7 +229,7 @@ start_webcam_overlay() {
   done
 
   local webcam_log=""
-  webcam_log=$(mktemp "${XDG_RUNTIME_DIR:-/tmp}/omaloom-webcam.XXXXXX.log") || {
+  webcam_log=$(mktemp "$RUNTIME_DIR/omaloom-webcam.XXXXXX.log") || {
     emit error message "unable to create webcam startup log"
     return 1
   }
@@ -181,6 +243,15 @@ start_webcam_overlay() {
     --no-border --no-audio --no-osc --osd-level=0 \
     --msg-level=all=warn >"$webcam_log" 2>&1 &
   local webcam_pid=$!
+  WEBCAM_PID="$webcam_pid"
+  if [[ -x $RUNTIME_HELPER ]]; then
+    if ! "$RUNTIME_HELPER" write-pid "$WEBCAM_PID_FILE" "$webcam_pid" >/dev/null 2>&1; then
+      kill "$webcam_pid" 2>/dev/null || true
+      rm -f "$webcam_log"
+      emit error message "unable to track webcam overlay process"
+      return 1
+    fi
+  fi
 
   local waited=0
   local mapped=false
@@ -244,6 +315,11 @@ start_recording() {
   local webcam_device=""
   local webcam_size="medium"
   local webcam_position="bottom-right"
+
+  trap cleanup_start_on_exit EXIT
+  trap 'cleanup_start_on_exit; exit 130' HUP INT TERM
+
+  [[ -n $RUNTIME_DIR ]] || fail "no safe per-user runtime directory found"
 
   while (($#)); do
     case $1 in
@@ -336,21 +412,37 @@ start_recording() {
   fi
   [[ -n $audio_devices ]] && audio_args+=(-a "$audio_devices" -ac aac)
 
-  local filename="$directory/screenrecording-$(date +'%Y-%m-%d_%H-%M-%S').mp4"
+  local filename=""
+  if ! filename=$(output_reserve "$directory"); then
+    cleanup_webcam
+    fail "could not reserve secure recording output path"
+  fi
+  OUTPUT_RESERVED="$filename"
+
+  if ! state_reserve "$filename"; then
+    cleanup_webcam
+    output_remove_if_owned "$filename"
+    OUTPUT_RESERVED=""
+    fail "could not reserve recording state file"
+  fi
   echo "===== $(date '+%F %T') omaloom target: $target =====" >>"$LOG_FILE"
   gpu-screen-recorder "${capture_args[@]}" -k auto -f 60 -fm cfr -fallback-cpu-encoding yes -o "$filename" "${audio_args[@]}" 2>>"$LOG_FILE" &
   local pid=$!
 
-  while kill -0 "$pid" 2>/dev/null && [[ ! -f $filename ]]; do
-    sleep 0.2
-  done
+  sleep 0.8
 
   if kill -0 "$pid" 2>/dev/null; then
-    echo "$filename" >"$RECORDING_FILE"
+    STATE_RETAIN=true
+    WEBCAM_RETAIN=true
+    OUTPUT_RESERVED=""
     toggle_screenrecording_indicator
     emit_recording_started "$filename"
   else
     cleanup_webcam
+    state_remove_if_owned
+    output_remove_if_owned "$filename"
+    OUTPUT_RESERVED=""
+    STATE_RESERVED=false
     fail "recording process exited before creating output"
   fi
 }
@@ -378,9 +470,7 @@ stop_recording() {
 
 status_recording() {
   local path=""
-  if [[ -f $RECORDING_FILE ]]; then
-    path=$(<"$RECORDING_FILE")
-  fi
+  path=$(state_read 2>/dev/null || true)
 
   if is_recording; then
     if [[ -n $path ]]; then

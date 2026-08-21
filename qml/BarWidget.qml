@@ -25,8 +25,9 @@ Panel {
   readonly property bool starting: state === "starting"
   readonly property bool recording: state === "recording"
   readonly property bool busy: selecting || preparing || countdown || starting || recording
-  readonly property bool canStart: !startDelay.running && !actionProcess.running && !busy
-  readonly property bool setupResourcesActive: root.opened && !root.busy && root.state !== "error"
+  readonly property bool webcamBlocksStart: omaloomSettings.recordWebcam && webcamAvailabilityState !== "ready"
+  readonly property bool canStart: !startDelay.running && !actionProcess.running && !busy && !webcamBlocksStart
+  readonly property bool setupResourcesActive: root.opened && !root.busy
   readonly property bool previewActive: setupResourcesActive && omaloomSettings.recordWebcam && mediaDevices.videoInputs.length > 0
   readonly property color contentForeground: bar ? bar.foreground : Color.foreground
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
@@ -45,6 +46,11 @@ Panel {
   property real microphoneLevel: 0
   property bool microphoneListOpen: false
   property bool webcamListOpen: false
+  property bool webcamDevicesLoaded: false
+  property bool webcamAvailabilityInFlight: false
+  property string webcamAvailabilityState: "disabled"
+  property string webcamAvailabilityDevice: ""
+  property string webcamAvailabilityStatus: ""
   property bool guideActive: false
   property var currentGuide: null
   property bool reopenAfterFolderPicker: false
@@ -89,7 +95,10 @@ Panel {
   }
 
   function startRecording() {
-    if (!canStart) return
+    if (!canStart) {
+      if (webcamBlocksStart && cameraSetupStatusText() !== "") lastMessage = cameraSetupStatusText()
+      return
+    }
     var args = [recorder, "start", "--directory", omaloomSettings.outputDirectory]
     if (omaloomSettings.recordFullscreen) args.push("--fullscreen")
     if (omaloomSettings.recordSystemAudio) args.push("--desktop-audio")
@@ -190,7 +199,89 @@ Panel {
     return "Done"
   }
 
+  function selectedWebcamDeviceId() {
+    if (omaloomSettings.webcamDevice !== "") return omaloomSettings.webcamDevice
+    return webcamDevices.length > 0 ? String(webcamDevices[0].id || "") : ""
+  }
+
+  function cameraSetupStatusText() {
+    if (webcamAvailabilityState === "starting") return "Starting up…"
+    if (webcamAvailabilityState === "ready") return "Ready to record locally."
+    if (webcamAvailabilityState === "busy") return "Camera is in use by another application. Close it or choose a different camera."
+    if (webcamAvailabilityState === "error") return webcamAvailabilityStatus || "Camera is unavailable. Choose a different camera or turn off webcam overlay."
+    return lastMessage
+  }
+
+  function displayedStatusText() {
+    if (root.busy || root.recording || root.state === "saved") return lastMessage
+    if (omaloomSettings.recordWebcam) return cameraSetupStatusText()
+    return lastMessage
+  }
+
+  function displayedStatusUrgent() {
+    if (root.state === "error") return true
+    if (root.busy || root.recording || root.state === "saved") return false
+    return omaloomSettings.recordWebcam && (webcamAvailabilityState === "busy" || webcamAvailabilityState === "error")
+  }
+
+  function resetWebcamAvailability() {
+    if (webcamAvailabilityProcess.running) webcamAvailabilityProcess.running = false
+    webcamAvailabilityInFlight = false
+    webcamAvailabilityDevice = ""
+    if (!omaloomSettings.recordWebcam) {
+      webcamAvailabilityState = "disabled"
+      webcamAvailabilityStatus = ""
+      return
+    }
+    webcamAvailabilityState = "starting"
+    webcamAvailabilityStatus = "Starting up…"
+    refreshWebcamAvailability(true)
+  }
+
+  function refreshWebcamAvailability(reset) {
+    if (reset === undefined) reset = false
+    if (!root.opened || root.busy || !omaloomSettings.recordWebcam) {
+      webcamAvailabilityInFlight = false
+      if (!root.opened || !omaloomSettings.recordWebcam) {
+        webcamAvailabilityState = "disabled"
+        webcamAvailabilityStatus = ""
+      }
+      webcamAvailabilityDevice = ""
+      if (webcamAvailabilityProcess.running) webcamAvailabilityProcess.running = false
+      return
+    }
+    if (!webcamDevicesLoaded) {
+      if (reset || webcamAvailabilityState === "disabled") {
+        webcamAvailabilityState = "starting"
+        webcamAvailabilityStatus = "Starting up…"
+      }
+      return
+    }
+    var device = selectedWebcamDeviceId()
+    if (device === "") {
+      webcamAvailabilityInFlight = false
+      webcamAvailabilityDevice = ""
+      webcamAvailabilityState = "error"
+      webcamAvailabilityStatus = "No camera found. Connect a camera or turn off webcam overlay."
+      return
+    }
+    var newTarget = webcamAvailabilityDevice !== device
+    if (reset || newTarget || webcamAvailabilityState === "disabled") {
+      webcamAvailabilityState = "starting"
+      webcamAvailabilityStatus = "Starting up…"
+    }
+    if (webcamAvailabilityProcess.running) {
+      if (!newTarget) return
+      webcamAvailabilityProcess.running = false
+    }
+    webcamAvailabilityDevice = device
+    webcamAvailabilityInFlight = true
+    webcamAvailabilityProcess.command = [devicesHelper, "check-camera", device]
+    webcamAvailabilityProcess.running = true
+  }
+
   function refreshDevices() {
+    webcamDevicesLoaded = false
     microphoneListProcess.command = [devicesHelper, "list-microphones"]
     webcamListProcess.command = [devicesHelper, "list-webcams"]
     microphoneListProcess.running = true
@@ -360,8 +451,13 @@ Panel {
     } else if (text.indexOf('"error"') !== -1) {
       hideRegionGuide()
       state = "error"
-      var message = extractJsonString(text, "message")
+      var message = event && typeof event.message === "string" ? event.message : extractJsonString(text, "message")
       lastMessage = message || text
+      if (omaloomSettings.recordWebcam) {
+        webcamAvailabilityState = message && message.indexOf("camera is already in use") !== -1 ? "busy" : "error"
+        webcamAvailabilityStatus = message || text
+      }
+      root.open()
     }
   }
 
@@ -370,6 +466,7 @@ Panel {
 
   onOpenedChanged: {
     if (opened) {
+      if (omaloomSettings.recordWebcam) resetWebcamAvailability()
       refreshDevices()
       restartMeterForSelectedDevice()
       dashboardTab = "record"
@@ -379,10 +476,11 @@ Panel {
       microphoneListOpen = false
       webcamListOpen = false
       updateMeter()
+      resetWebcamAvailability()
     }
   }
-  onBusyChanged: updateMeter()
-  onStateChanged: updateMeter()
+  onBusyChanged: { updateMeter(); refreshWebcamAvailability() }
+  onStateChanged: { updateMeter(); refreshWebcamAvailability() }
 
   OmaloomRegionGuide {
     active: root.guideActive
@@ -393,7 +491,9 @@ Panel {
   OmaloomSettings {
     id: omaloomSettings
     onRecordMicrophoneChanged: root.updateMeter()
+    onRecordWebcamChanged: root.resetWebcamAvailability()
     onMicrophoneDeviceChanged: root.restartMeterForSelectedDevice()
+    onWebcamDeviceChanged: root.resetWebcamAvailability()
     onOutputDirectoryChanged: {
       root.recordings = []
       root.recordingsError = ""
@@ -454,6 +554,14 @@ Panel {
     interval: 100
     repeat: false
     onTriggered: root.updateMeter()
+  }
+
+  Timer {
+    id: webcamAvailabilityPoll
+    interval: 2500
+    repeat: true
+    running: root.opened && root.setupResourcesActive && omaloomSettings.recordWebcam
+    onTriggered: root.refreshWebcamAvailability()
   }
 
   Timer {
@@ -576,7 +684,61 @@ Panel {
 
   Process {
     id: webcamListProcess
-    stdout: SplitParser { onRead: function(line) { root.webcamDevices = root.parseDeviceList(line, []) } }
+    stdout: SplitParser {
+      onRead: function(line) {
+        root.webcamDevices = root.parseDeviceList(line, [])
+        root.webcamDevicesLoaded = true
+        root.refreshWebcamAvailability()
+      }
+    }
+    onExited: function(exitCode) {
+      root.webcamDevicesLoaded = true
+      if (exitCode !== 0 && root.webcamDevices.length === 0 && omaloomSettings.recordWebcam) {
+        root.webcamAvailabilityState = "error"
+        root.webcamAvailabilityStatus = "Could not list cameras. Turn off webcam overlay or try again."
+      } else {
+        root.refreshWebcamAvailability()
+      }
+    }
+  }
+
+  Process {
+    id: webcamAvailabilityProcess
+    stdout: SplitParser {
+      onRead: function(line) {
+        try {
+          var payload = JSON.parse(String(line || "{}"))
+          if (String(payload.device || "") !== root.webcamAvailabilityDevice) return
+          if (payload.available === true && payload.busy !== true) {
+            root.webcamAvailabilityState = "ready"
+            root.webcamAvailabilityStatus = "Ready to record locally."
+          } else if (payload.busy === true) {
+            root.webcamAvailabilityState = "busy"
+            root.webcamAvailabilityStatus = "Camera is in use by another application. Close it or choose a different camera."
+          } else {
+            root.webcamAvailabilityState = "error"
+            root.webcamAvailabilityStatus = payload.error || "Camera is unavailable. Choose a different camera or turn off webcam overlay."
+          }
+        } catch (e) {
+          root.webcamAvailabilityState = "error"
+          root.webcamAvailabilityStatus = "Camera availability could not be checked. Close other camera apps or choose a different camera."
+        }
+      }
+    }
+    stderr: SplitParser {
+      onRead: function(line) {
+        root.webcamAvailabilityState = "error"
+        root.webcamAvailabilityStatus = "Camera availability could not be checked. Close other camera apps or choose a different camera."
+        console.warn("Omaloom camera availability failed:", String(line))
+      }
+    }
+    onExited: function(exitCode) {
+      root.webcamAvailabilityInFlight = false
+      if (exitCode !== 0 && omaloomSettings.recordWebcam && root.webcamAvailabilityDevice !== "") {
+        root.webcamAvailabilityState = "error"
+        root.webcamAvailabilityStatus = "Camera availability could not be checked. Close other camera apps or choose a different camera."
+      }
+    }
   }
 
   Process {
@@ -626,12 +788,37 @@ Panel {
   Process {
     id: actionProcess
     stdout: SplitParser { onRead: function(line) { root.updateFromLine(line) } }
-    stderr: SplitParser { onRead: function(line) { root.hideRegionGuide(); root.lastMessage = String(line); root.state = "error" } }
+    stderr: SplitParser {
+      onRead: function(line) {
+        var text = String(line || "")
+        var message = text
+        try {
+          var payload = JSON.parse(text)
+          if (typeof payload.message === "string") message = payload.message
+          else if (typeof payload.error === "string") message = payload.error
+        } catch (e) {}
+        root.hideRegionGuide()
+        root.lastMessage = message
+        root.state = "error"
+        if (omaloomSettings.recordWebcam) {
+          root.webcamAvailabilityState = message.indexOf("camera is already in use") !== -1 ? "busy" : "error"
+          root.webcamAvailabilityStatus = message
+        }
+        root.open()
+      }
+    }
     onExited: function(exitCode) {
       if (exitCode !== 0 && root.state !== "error" && root.state !== "idle") {
         root.hideRegionGuide()
         root.state = "error"
         root.lastMessage = "Recorder start exited with code " + exitCode
+        if (omaloomSettings.recordWebcam) {
+          root.webcamAvailabilityState = "error"
+          root.webcamAvailabilityStatus = root.lastMessage
+        }
+        root.open()
+      } else if (exitCode !== 0 && root.state === "error") {
+        root.open()
       } else {
         root.refresh()
       }
@@ -1036,8 +1223,8 @@ Panel {
     Text {
       textFormat: Text.PlainText
       width: parent.width
-      text: root.lastMessage
-      color: Qt.darker(root.contentForeground, 1.6)
+      text: root.displayedStatusText()
+      color: root.displayedStatusUrgent() ? Color.urgent : Qt.darker(root.contentForeground, 1.6)
       font.family: root.contentFontFamily
       font.pixelSize: Style.font.caption
       wrapMode: Text.Wrap

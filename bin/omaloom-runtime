@@ -1,0 +1,157 @@
+#!/usr/bin/python3
+"""Validate Omaloom runtime dirs and own webcam PID state."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pathlib
+import signal
+import stat
+import sys
+
+class RuntimeError_(RuntimeError):
+    pass
+
+def validate_dir(path: str) -> str:
+    p = pathlib.Path(path).resolve(strict=True)
+    st = os.lstat(p)
+    if not stat.S_ISDIR(st.st_mode):
+        raise RuntimeError_("runtime path is not a directory")
+    if os.path.islink(path):
+        raise RuntimeError_("runtime path is a symlink")
+    if st.st_uid != os.getuid():
+        raise RuntimeError_("runtime directory is owned by another user")
+    if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise RuntimeError_("runtime directory must not be group/world writable")
+    return str(p)
+
+def select_runtime() -> str:
+    candidates = []
+    xdg = os.environ.get("XDG_RUNTIME_DIR")
+    if xdg:
+        candidates.append(xdg)
+    candidates.append(f"/run/user/{os.getuid()}")
+    errors = []
+    for candidate in candidates:
+        try:
+            return validate_dir(candidate)
+        except Exception as exc:
+            errors.append(f"{candidate}: {exc}")
+    raise RuntimeError_("no safe runtime directory: " + "; ".join(errors))
+
+def validate_pid_file(path: str) -> os.stat_result:
+    st = os.lstat(path)
+    if stat.S_ISLNK(st.st_mode):
+        raise RuntimeError_("pid file is a symlink")
+    if not stat.S_ISREG(st.st_mode):
+        raise RuntimeError_("pid file is not regular")
+    if st.st_uid != os.getuid():
+        raise RuntimeError_("pid file owned by another user")
+    if st.st_nlink != 1:
+        raise RuntimeError_("pid file has multiple hard links")
+    return st
+
+def proc_uid(pid: int) -> int:
+    with open(f"/proc/{pid}/status", "r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("Uid:"):
+                return int(line.split()[1])
+    raise RuntimeError_("process uid unavailable")
+
+def proc_cmdline(pid: int) -> list[str]:
+    data = pathlib.Path(f"/proc/{pid}/cmdline").read_bytes()
+    return [part.decode("utf-8", "replace") for part in data.split(b"\0") if part]
+
+def validate_webcam_process(pid: int) -> None:
+    if pid <= 0:
+        raise RuntimeError_("invalid pid")
+    if proc_uid(pid) != os.getuid():
+        raise RuntimeError_("pid is owned by another user")
+    exe = pathlib.Path(f"/proc/{pid}/exe").resolve(strict=True).name
+    if exe != "mpv":
+        raise RuntimeError_("pid is not mpv")
+    argv = proc_cmdline(pid)
+    if "--title=WebcamOverlay" not in argv or not any(
+        arg.startswith("--wayland-app-id=WebcamOverlay-") for arg in argv
+    ):
+        raise RuntimeError_("pid is not Omaloom WebcamOverlay")
+
+def write_pid(path: str, pid_s: str) -> int:
+    pid = int(pid_s)
+    validate_webcam_process(pid)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        os.write(fd, f"{pid}\n".encode())
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return 0
+
+def read_pid_number(path: str) -> int:
+    st = validate_pid_file(path)
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        after = os.fstat(fd)
+        if (after.st_dev, after.st_ino, after.st_uid, stat.S_IFMT(after.st_mode)) != (st.st_dev, st.st_ino, st.st_uid, stat.S_IFREG):
+            raise RuntimeError_("pid file changed while opening")
+        data = os.read(fd, 64)
+    finally:
+        os.close(fd)
+    return int(data.decode().strip())
+
+
+def read_pid(path: str) -> int:
+    pid = read_pid_number(path)
+    validate_webcam_process(pid)
+    return pid
+
+
+def signal_remove(path: str) -> int:
+    pid = read_pid_number(path)
+    sig = signal.SIGTERM
+    if hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"):
+        # Hold a stable reference before validating /proc so numeric PID reuse
+        # cannot redirect the subsequent signal to a different process.
+        pidfd = os.pidfd_open(pid, 0)
+        try:
+            validate_webcam_process(pid)
+            signal.pidfd_send_signal(pidfd, sig, None, 0)
+        finally:
+            os.close(pidfd)
+    else:
+        validate_webcam_process(pid)
+        os.kill(pid, sig)
+    remove(path)
+    return 0
+
+def remove(path: str) -> int:
+    validate_pid_file(path)
+    os.unlink(path)
+    return 0
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("select")
+    v = sub.add_parser("validate-dir"); v.add_argument("path")
+    w = sub.add_parser("write-pid"); w.add_argument("path"); w.add_argument("pid")
+    r = sub.add_parser("read-pid"); r.add_argument("path")
+    s = sub.add_parser("signal-remove"); s.add_argument("path")
+    rm = sub.add_parser("remove"); rm.add_argument("path")
+    args = parser.parse_args(argv[1:])
+    try:
+        if args.command == "select": print(select_runtime()); return 0
+        if args.command == "validate-dir": print(validate_dir(args.path)); return 0
+        if args.command == "write-pid": return write_pid(args.path, args.pid)
+        if args.command == "read-pid": print(read_pid(args.path)); return 0
+        if args.command == "signal-remove": return signal_remove(args.path)
+        if args.command == "remove": return remove(args.path)
+    except Exception as exc:
+        print(json.dumps({"error": str(exc)}, sort_keys=True), file=sys.stderr)
+        return 2
+    return 2
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

@@ -26,7 +26,7 @@ Omaloom (`coak.omaloom`) is a Cause of a Kind Omarchy plugin for fast local MP4 
 - Visible 5–1 countdown before recording starts.
 - Region captures show a click-through, outside-only guide from selection through recording.
 - Optional system audio and microphone capture as separate toggles.
-- Microphone and webcam device selectors with setup-only live mic meter and representative composition preview.
+- Microphone and webcam device selectors with setup-only live mic meter, representative composition preview, and proactive occupied-camera warning.
 - Portal-backed output folder picker isolated from Quickshell.
 - Persistent settings in `~/.config/omaloom/settings.json`.
 - Local recordings library scanned from the selected output folder, with Open, Reveal, and Copy path actions.
@@ -93,7 +93,7 @@ Current-monitor/fullscreen capture skips the interactive source selector. Region
 - **Position** — choose the overlay corner: top-left, top-right, bottom-left, or bottom-right.
 - **Size** — choose small, medium, or large using Omarchy's overlay size ladder.
 
-The setup preview resources are temporary: the mic meter and composition preview run only while the setup UI is open and enabled, and they are destroyed before selection/countdown/recording. The composition preview uses the popup's current monitor aspect ratio and is representative before region selection; after selection the actual mpv webcam overlay is resized and moved to the selected corner of the chosen region or monitor before the numeric countdown begins.
+The setup preview resources are temporary: the mic meter, composition preview, and proactive camera availability polling run only while the setup UI is open and enabled, and they are destroyed before selection/countdown/recording. The composition preview uses the popup's current monitor aspect ratio and is representative before region selection; after selection the actual mpv webcam overlay is resized and moved to the selected corner of the chosen region or monitor before the numeric countdown begins.
 
 ## Library
 
@@ -117,7 +117,7 @@ Omaloom is designed for Omarchy Quattro/Quickshell on Wayland. Stock Omarchy sup
 - `gpu-screen-recorder`
 - `omarchy-capture-region`, `omarchy-capture-webcam-list`, `omarchy-capture-webcam-resize`
 - `hyprctl`, `jq`
-- `mpv`, `v4l2-ctl`, and `fuser` (from `psmisc`) for webcam overlay support and occupied-device detection
+- `mpv`, `v4l2-ctl`, and `fuser` (from `psmisc`) for webcam overlay support and backend occupied-device race checks
 - `pactl` and `ffmpeg` for input discovery/metering
 - `wl-copy` for Copy path
 - xdg-desktop-portal `org.freedesktop.portal.FileChooser` for folder picking
@@ -137,6 +137,12 @@ bin/omaloom-recordings copy-path ~/Videos/Omaloom/file.mp4
 
 All QML-to-helper calls pass argv arrays, not shell-concatenated commands.
 
+## Security notes
+
+Omaloom keeps compatibility with Omarchy's stock top-center stop control, which expects the active recording path at `/tmp/omarchy-screenrecord-filename`. `bin/omaloom-state` manages that fixed path safely: it rejects symlinks, FIFOs, wrong-owner or hard-linked entries, replaces only an owned stale regular file, atomically creates the state file with no-follow/exclusive flags where available, writes mode `0600`, validates reads for status, and removes only owner-validated regular state on startup failure.
+
+Recording output paths are reserved by `bin/omaloom-output` with unpredictable names and `O_CREAT|O_EXCL|O_NOFOLLOW` in the selected folder. For safety, the final output folder must already exist, be owned by the current user, and not be group/world writable; ordinary private folders and Dropbox-style `0755` folders are supported. Runtime debug logs, webcam PID state, and the Omarchy-compatible region basename live under a validated private per-user runtime directory, not shared `/tmp`. Omaloom validates the webcam PID file and target process before signaling, uses controlled command lookup for helper subprocesses, and installs startup cleanup traps before selection/countdown.
+
 ## Architecture
 
 - `manifest.json` — Omarchy plugin metadata for service, panel, and bar-widget entrypoints.
@@ -145,6 +151,7 @@ All QML-to-helper calls pass argv arrays, not shell-concatenated commands.
 - `qml/OmaloomRegionGuide.qml` — click-through outside-only region guide.
 - `bin/omaloom-recorder` — recorder wrapper over Omarchy/gpu-screen-recorder behavior.
 - `bin/omaloom-settings` — atomic JSON settings persistence.
+- `bin/omaloom-state` — secure fixed-path recording state for Omarchy stop compatibility.
 - `bin/omaloom-folder-picker` — portal-backed folder picker process.
 - `bin/omaloom-devices` — microphone/camera discovery and mic meter helper.
 - `bin/omaloom-geometry` — region/monitor mapping and guide event JSON.
@@ -157,7 +164,7 @@ More detail: [`docs/architecture.md`](docs/architecture.md), [`docs/PLAN.md`](do
 
 ```bash
 bash -n bin/omaloom-recorder
-python3 -m py_compile bin/omaloom-settings bin/omaloom-devices bin/omaloom-folder-picker bin/omaloom-geometry bin/omaloom-webcam-placement bin/omaloom-recordings tests/test_omaloom_*.py
+python3 -m py_compile bin/omaloom-settings bin/omaloom-state bin/omaloom-output bin/omaloom-devices bin/omaloom-folder-picker bin/omaloom-geometry bin/omaloom-webcam-placement bin/omaloom-recordings tests/test_omaloom_*.py
 for t in tests/test_omaloom_*.py; do PYTHONDONTWRITEBYTECODE=1 python3 "$t"; done
 qmllint qml/*.qml
 omarchy plugin validate .
@@ -178,7 +185,7 @@ omarchy-shell shell ping
 
 ### Webcam says it is already in use
 
-Omaloom's recording overlay opens the selected camera directly through V4L2/mpv. Most physical `/dev/video*` cameras cannot be shared by Chromium, video calls, OBS, and Omaloom at the same time. If another app already owns the camera, Omaloom now stops before countdown and reports `camera is already in use by another application`; it does not kill or interrupt the other app.
+Omaloom's recording overlay opens the selected camera directly through V4L2/mpv. Most physical `/dev/video*` cameras cannot be shared by Chromium, video calls, OBS, and Omaloom at the same time. While setup is open, Omaloom lightly checks the selected physical camera and disables Start with `Camera is in use by another application. Close it or choose a different camera.` when another same-user process appears to hold it. If a race occurs after Start, the backend still stops before countdown and reports `camera is already in use by another application`; it does not kill or interrupt the other app.
 
 Close the other camera app before recording, or route your camera through OBS/another virtual camera and select that virtual device in Omaloom when you need simultaneous use.
 

@@ -1,0 +1,133 @@
+#!/usr/bin/python3
+"""Secure fixed-path state helper for Omaloom/Omarchy interop.
+
+The stock Omarchy stop command reads /tmp/omarchy-screenrecord-filename. This
+helper safely reserves, reads, and removes that fixed path without following
+symlinks or accepting unsafe pre-existing nodes.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import stat
+import sys
+
+
+class StateError(RuntimeError):
+    pass
+
+
+def nofollow_flag() -> int:
+    return getattr(os, "O_NOFOLLOW", 0)
+
+
+def validate_abs_path(path: str) -> str:
+    if not path.startswith("/"):
+        raise StateError("state path must be absolute")
+    return path
+
+
+def lstat_existing(path: str) -> os.stat_result | None:
+    try:
+        return os.lstat(path)
+    except FileNotFoundError:
+        return None
+
+
+def validate_existing_regular(path: str) -> os.stat_result:
+    st = lstat_existing(path)
+    if st is None:
+        raise StateError("state file does not exist")
+    if stat.S_ISLNK(st.st_mode):
+        raise StateError("state path is a symlink")
+    if not stat.S_ISREG(st.st_mode):
+        raise StateError("state path is not a regular file")
+    if st.st_uid != os.getuid():
+        raise StateError("state file is owned by another user")
+    if st.st_nlink != 1:
+        raise StateError("state file has multiple hard links")
+    return st
+
+
+def reserve(path: str, value: str) -> int:
+    path = validate_abs_path(path)
+    parent = os.path.dirname(path) or "/"
+    if not os.path.isdir(parent):
+        raise StateError("state parent directory does not exist")
+
+    st = lstat_existing(path)
+    if st is not None:
+        validate_existing_regular(path)
+        os.unlink(path)
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow_flag()
+    try:
+        fd = os.open(path, flags, 0o600)
+    except FileExistsError as exc:
+        raise StateError("state path appeared during reserve") from exc
+    try:
+        os.write(fd, value.encode("utf-8") + b"\n")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return 0
+
+
+def read(path: str) -> int:
+    path = validate_abs_path(path)
+    st = validate_existing_regular(path)
+    flags = os.O_RDONLY | nofollow_flag()
+    fd = os.open(path, flags)
+    try:
+        after = os.fstat(fd)
+        if (after.st_dev, after.st_ino, after.st_uid, stat.S_IFMT(after.st_mode)) != (
+            st.st_dev,
+            st.st_ino,
+            st.st_uid,
+            stat.S_IFREG,
+        ):
+            raise StateError("state file changed while opening")
+        data = os.read(fd, 8192)
+    finally:
+        os.close(fd)
+    text = data.decode("utf-8", errors="strict").splitlines()[0].strip() if data else ""
+    if not text.startswith("/"):
+        raise StateError("state value is not an absolute path")
+    print(text)
+    return 0
+
+
+def remove(path: str) -> int:
+    path = validate_abs_path(path)
+    validate_existing_regular(path)
+    os.unlink(path)
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="Securely manage Omaloom fixed state files")
+    sub = parser.add_subparsers(dest="command", required=True)
+    p = sub.add_parser("reserve")
+    p.add_argument("path")
+    p.add_argument("value")
+    p = sub.add_parser("read")
+    p.add_argument("path")
+    p = sub.add_parser("remove")
+    p.add_argument("path")
+    args = parser.parse_args(argv[1:])
+    try:
+        if args.command == "reserve":
+            return reserve(args.path, args.value)
+        if args.command == "read":
+            return read(args.path)
+        if args.command == "remove":
+            return remove(args.path)
+    except Exception as exc:
+        print(json.dumps({"error": str(exc)}, sort_keys=True), file=sys.stderr)
+        return 2
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

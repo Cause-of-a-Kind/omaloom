@@ -54,6 +54,20 @@ def test_source_selected_event_includes_guide_only_for_regions():
     assert monitor_event == {"event": "source_selected", "target": "monitor:DP-1"}
 
 
+def test_controlled_path_fails_closed_for_hyprctl_lookup():
+    original = module.shutil.which
+    module.shutil.which = lambda command, path=None: None
+    try:
+        try:
+            module.load_hyprctl_monitors()
+        except module.GeometryError as exc:
+            assert "controlled PATH" in str(exc)
+        else:
+            raise AssertionError("bare hyprctl fallback should not be used")
+    finally:
+        module.shutil.which = original
+
+
 def test_cli_outputs_machine_json():
     proc = subprocess.run(
         [str(HELPER), "guide", "region:100x100+10+10", "--monitors-json", json.dumps(MONITORS)],
@@ -81,5 +95,6 @@ if __name__ == "__main__":
     test_monitor_mapping_spans_negative_and_primary()
     test_monitor_dimensions_are_logical_and_transform_aware()
     test_source_selected_event_includes_guide_only_for_regions()
+    test_controlled_path_fails_closed_for_hyprctl_lookup()
     test_cli_outputs_machine_json()
     print("geometry tests passed")

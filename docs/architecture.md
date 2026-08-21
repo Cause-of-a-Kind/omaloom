@@ -7,6 +7,8 @@ coak.omaloom
 ├── manifest.json          # plugin metadata and entrypoint wiring
 ├── bin/omaloom-recorder   # stable Omaloom CLI over `omarchy screenrecord`
 ├── bin/omaloom-settings      # atomic JSON persistence helper
+├── bin/omaloom-state         # secure fixed-path recorder state helper
+├── bin/omaloom-output        # secure unpredictable MP4 output reservation
 ├── bin/omaloom-folder-picker # isolated xdg-desktop-portal folder picker
 ├── bin/omaloom-geometry      # region/monitor guide mapping
 ├── bin/omaloom-recordings    # saved MP4 listing/open/reveal/copy actions
@@ -52,6 +54,14 @@ omarchy screenrecord --stop-recording
 ```
 
 That preserves Omarchy's SIGINT save behavior, webcam cleanup, MP4 finalization, thumbnail notification, and the built-in recording indicator/stop control.
+
+Omarchy's stock stop path reads `/tmp/omarchy-screenrecord-filename`. Omaloom preserves that compatibility but never writes it with shell redirection. `bin/omaloom-state` is a stdlib `/usr/bin/python3` helper that `lstat`s existing entries without following links, rejects symlinks/FIFOs/wrong-owner/hard-linked state, safely replaces an owned stale regular file, and atomically reserves the fixed path with `O_CREAT|O_EXCL|O_NOFOLLOW` where available and mode `0600`. Recorder startup reserves the state path before launching `gpu-screen-recorder`, retains it only after successful startup, and removes owner/type-validated state on early launch failure.
+
+`bin/omaloom-output` reserves the MP4 destination with an unpredictable timestamp+secret name in the selected folder using a directory fd and `O_CREAT|O_EXCL|O_NOFOLLOW` mode `0600`. It canonicalizes the existing output directory, rejects cross-user writable non-sticky ancestors, requires the final directory to be owned by the current user and not group/world writable, revalidates the opened directory fd, and validates/removes only owned regular single-link reserved outputs on startup failure. This preserves normal owned `0755` synced folders while refusing attacker-writable drop targets.
+
+Runtime artifacts other than the stock Omarchy fixed state file live under a validated per-user runtime directory: canonical existing directory, current-user owned, not symlinked, and not group/world writable. `bin/omaloom-runtime` creates/reads/removes the webcam PID file without following links and mode `0600`, and only signals the recorded PID after validating same UID, `/proc` executable basename `mpv`, and Omaloom's expected `WebcamOverlay` argv. Startup cleanup traps are installed before source selection/webcam/countdown and only retain state/output/webcam overlay after successful recording startup.
+
+`bin/omaloom-devices check-camera /dev/videoN` provides setup-time occupied-camera UX. It scans same-UID `/proc/*/fd` owners for the selected physical V4L2 device, ignores the helper and parent Omarchy shell process so Qt setup preview does not mark itself busy, and emits structured JSON. This is only a proactive hint; `bin/omaloom-recorder` keeps the backend ownership/open checks immediately before the real mpv overlay for TOCTOU/race safety.
 
 Output is newline-delimited JSON-ish events for QML parsing, for example:
 

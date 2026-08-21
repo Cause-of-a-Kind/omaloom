@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 from typing import Any
@@ -12,6 +13,7 @@ from typing import Any
 POSITIONS = {"top-left", "top-right", "bottom-left", "bottom-right"}
 SIZES = {"small", "medium", "large"}
 MARGIN = 40
+CONTROLLED_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/share/omarchy/bin"
 REGION_RE = re.compile(r"^region:(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$")
 ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]+$")
 
@@ -116,6 +118,13 @@ def compute(target: str, monitors_json: str, size: str, position: str, monitor_i
     return placement(anchor, size, position)
 
 
+def which(command: str) -> str:
+    resolved = shutil.which(command, path=CONTROLLED_PATH)
+    if not resolved:
+        raise PlacementError(f"required command not found in controlled PATH: {command}")
+    return resolved
+
+
 def dispatch_window(address: str, rect: dict[str, int]) -> None:
     if not ADDRESS_RE.match(address):
         raise PlacementError("invalid webcam window address")
@@ -132,9 +141,10 @@ def dispatch_window(address: str, rect: dict[str, int]) -> None:
             f'exact {rect["x"]} {rect["y"]},{window}',
         ),
     ]
+    hyprctl = which("hyprctl")
     for lua_command, legacy_dispatcher, legacy_argument in commands:
         result = subprocess.run(
-            ["hyprctl", "dispatch", lua_command],
+            [hyprctl, "dispatch", lua_command],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
@@ -142,7 +152,7 @@ def dispatch_window(address: str, rect: dict[str, int]) -> None:
         if result.returncode == 0:
             continue
         result = subprocess.run(
-            ["hyprctl", "dispatch", legacy_dispatcher, legacy_argument],
+            [hyprctl, "dispatch", legacy_dispatcher, legacy_argument],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
@@ -152,11 +162,12 @@ def dispatch_window(address: str, rect: dict[str, int]) -> None:
 
 
 def apply(target: str, size: str, position: str) -> int:
-    clients = json.loads(subprocess.check_output(["hyprctl", "clients", "-j"], text=True))
+    hyprctl = which("hyprctl")
+    clients = json.loads(subprocess.check_output([hyprctl, "clients", "-j"], text=True))
     client = next((c for c in clients if c.get("title") == "WebcamOverlay"), None)
     if not client:
         return 0
-    monitors_json = subprocess.check_output(["hyprctl", "monitors", "-j"], text=True)
+    monitors_json = subprocess.check_output([hyprctl, "monitors", "-j"], text=True)
     rect = compute(target, monitors_json, size, position, int(client.get("monitor", -1)))
     dispatch_window(str(client["address"]), rect)
     return 0

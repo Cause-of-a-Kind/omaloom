@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import pathlib
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 from typing import Any
+
+CONTROLLED_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/share/omarchy/bin"
+
+
+def which(command: str) -> str | None:
+    return shutil.which(command, path=CONTROLLED_PATH)
 
 
 def emit(obj: Any) -> None:
@@ -18,7 +27,7 @@ def emit(obj: Any) -> None:
 
 def list_microphones() -> int:
     devices = [{"id": "default_input", "label": "Default microphone"}]
-    pactl = shutil.which("pactl")
+    pactl = which("pactl")
     if pactl:
         try:
             raw = subprocess.check_output(
@@ -38,7 +47,7 @@ def list_microphones() -> int:
 
 def list_webcams() -> int:
     devices = []
-    cmd = shutil.which("omarchy-capture-webcam-list")
+    cmd = which("omarchy-capture-webcam-list")
     if cmd:
         try:
             raw = subprocess.check_output([cmd], text=True, stderr=subprocess.DEVNULL)
@@ -55,7 +64,7 @@ def list_webcams() -> int:
         except Exception:
             pass
     if not devices:
-        v4l = shutil.which("v4l2-ctl")
+        v4l = which("v4l2-ctl")
         if v4l:
             try:
                 raw = subprocess.check_output([v4l, "--list-devices"], text=True, stderr=subprocess.DEVNULL)
@@ -71,8 +80,89 @@ def list_webcams() -> int:
     return 0
 
 
+def same_device(path: str, fd_target: str, device_stat: os.stat_result) -> bool:
+    if fd_target != path and not fd_target.startswith(path + " "):
+        return False
+    try:
+        target_stat = os.stat(fd_target.split(" (deleted)", 1)[0])
+    except OSError:
+        return False
+    return stat.S_ISCHR(target_stat.st_mode) and target_stat.st_rdev == device_stat.st_rdev
+
+
+def process_uid(pid: int) -> int | None:
+    try:
+        with open(f"/proc/{pid}/status", "r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("Uid:"):
+                    return int(line.split()[1])
+    except OSError:
+        return None
+    return None
+
+
+def process_name(pid: int) -> str:
+    try:
+        return pathlib.Path(f"/proc/{pid}/comm").read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def camera_availability(device: str, ignore_pids: set[int] | None = None, proc_root: pathlib.Path = pathlib.Path("/proc")) -> dict[str, Any]:
+    if ignore_pids is None:
+        ignore_pids = {os.getpid(), os.getppid()}
+    result: dict[str, Any] = {"device": device, "available": False, "busy": True, "owners": []}
+    if not device or not device.startswith("/dev/video"):
+        result["error"] = "invalid camera device"
+        return result
+    try:
+        device_path = os.path.realpath(device)
+        st = os.stat(device_path)
+        if not stat.S_ISCHR(st.st_mode):
+            result["error"] = "camera device is not a character device"
+            return result
+    except OSError as exc:
+        result["error"] = f"camera device unavailable: {exc.strerror or exc}"
+        return result
+
+    current_uid = os.getuid()
+    owners: list[dict[str, Any]] = []
+    for proc_dir in proc_root.iterdir():
+        if not proc_dir.name.isdigit():
+            continue
+        pid = int(proc_dir.name)
+        if pid in ignore_pids:
+            continue
+        if process_uid(pid) != current_uid:
+            continue
+        fd_dir = proc_dir / "fd"
+        try:
+            fds = list(fd_dir.iterdir())
+        except OSError:
+            continue
+        for fd in fds:
+            try:
+                target = os.readlink(fd)
+            except OSError:
+                continue
+            if same_device(device_path, target, st):
+                owners.append({"pid": pid, "name": process_name(pid)})
+                break
+    result["owners"] = owners
+    result["busy"] = len(owners) > 0
+    result["available"] = len(owners) == 0
+    if owners:
+        result["message"] = "Camera is in use by another application. Close it or choose a different camera."
+    return result
+
+
+def check_camera(device: str) -> int:
+    emit(camera_availability(device))
+    return 0
+
+
 def meter(device: str) -> int:
-    ffmpeg = shutil.which("ffmpeg")
+    ffmpeg = which("ffmpeg")
     if not ffmpeg:
         return 1
     if not device:
@@ -129,12 +219,17 @@ def meter(device: str) -> int:
 
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
-        print("usage: omaloom-devices list-microphones|list-webcams|meter [DEVICE]", file=sys.stderr)
+        print("usage: omaloom-devices list-microphones|list-webcams|check-camera DEVICE|meter [DEVICE]", file=sys.stderr)
         return 2
     if argv[1] == "list-microphones":
         return list_microphones()
     if argv[1] == "list-webcams":
         return list_webcams()
+    if argv[1] == "check-camera":
+        if len(argv) != 3:
+            print("usage: omaloom-devices check-camera DEVICE", file=sys.stderr)
+            return 2
+        return check_camera(argv[2])
     if argv[1] == "meter":
         return meter(argv[2] if len(argv) > 2 else "default_input")
     print(f"unknown command: {argv[1]}", file=sys.stderr)
