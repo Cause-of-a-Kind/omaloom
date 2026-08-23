@@ -65,6 +65,21 @@ def test_camera_availability_fails_safely_for_invalid_device():
     assert "error" in payload
 
 
+def test_meter_level_mapping_and_persistent_process():
+    assert module.meter_level("-inf") == 0.0
+    assert module.meter_level("-72") == 0.0
+    assert module.meter_level("-12") == 1.0
+    source = HELPER.read_text(encoding="utf-8")
+    meter_source = source[source.index("def meter(device:"):source.index("def main(argv:")]
+    assert "subprocess.Popen(" in meter_source
+    assert "preexec_fn=terminate_with_parent" in meter_source
+    assert "PR_SET_PDEATHSIG" in source
+    assert "direct=1" in meter_source
+    assert "subprocess.run(" not in meter_source
+    assert " = false" not in meter_source
+    assert " = true" not in meter_source
+
+
 def test_device_lists_are_json_arrays():
     microphones = load("list-microphones")
     webcams = load("list-webcams")
@@ -76,5 +91,6 @@ def test_device_lists_are_json_arrays():
 if __name__ == "__main__":
     test_camera_availability_reports_busy_same_user_and_ignores_self_parent()
     test_camera_availability_fails_safely_for_invalid_device()
+    test_meter_level_mapping_and_persistent_process()
     test_device_lists_are_json_arrays()
     print("device tests passed")

@@ -25,7 +25,14 @@ RUNTIME_DIR=$(runtime_dir 2>/dev/null || true)
 [[ -n $RUNTIME_DIR ]] && export XDG_RUNTIME_DIR="$RUNTIME_DIR"
 REGION_FILE=$([[ -n $RUNTIME_DIR ]] && echo "$RUNTIME_DIR/omarchy-screenrecord-region" || echo "")
 WEBCAM_PID_FILE=$([[ -n $RUNTIME_DIR ]] && echo "$RUNTIME_DIR/omaloom-webcam.pid" || echo "")
-LOG_FILE=$([[ ${OMARCHY_SCREENRECORD_DEBUG:-false} == "true" && -n $RUNTIME_DIR ]] && echo "$RUNTIME_DIR/omaloom-screenrecord.log" || echo "/dev/null")
+LOG_FILE=$([[ (${OMARCHY_SCREENRECORD_DEBUG:-false} == "true" || ${OMALOOM_PROFILE:-false} == "true") && -n $RUNTIME_DIR ]] && echo "$RUNTIME_DIR/omaloom-screenrecord.log" || echo "/dev/null")
+
+profile() {
+  [[ ${OMALOOM_PROFILE:-false} == "true" ]] || return 0
+  local monotonic _
+  read -r monotonic _ </proc/uptime || monotonic=$EPOCHREALTIME
+  printf 'PROFILE\t%s\t%s\n' "$monotonic" "$1" >>"$LOG_FILE"
+}
 
 usage() {
   cat <<'USAGE'
@@ -177,6 +184,12 @@ cleanup_webcam() {
   [[ -n $REGION_FILE ]] && rm -f "$REGION_FILE"
 }
 
+webcam_overlay_ready() {
+  [[ -n $WEBCAM_PID ]] || return 1
+  kill -0 "$WEBCAM_PID" 2>/dev/null || return 1
+  hyprctl clients -j | jq -e 'any(.[]; .title == "WebcamOverlay")' >/dev/null 2>&1
+}
+
 microphone_available() {
   local requested=${1-}
   [[ -z $requested || $requested == default_input ]] && return 0
@@ -205,11 +218,16 @@ start_webcam_overlay() {
   # mapped-but-empty mpv window when another application still owns it.
   if command -v fuser >/dev/null 2>&1; then
     local owner_waited=0
-    while ((owner_waited < 20)) && fuser "$webcam_device" >/dev/null 2>&1; do
+    local camera_busy=true
+    while ((owner_waited < 20)); do
+      if ! fuser "$webcam_device" >/dev/null 2>&1; then
+        camera_busy=false
+        break
+      fi
       sleep 0.05
       owner_waited=$((owner_waited + 1))
     done
-    if fuser "$webcam_device" >/dev/null 2>&1; then
+    if [[ $camera_busy == true ]]; then
       emit error message "camera is already in use by another application"
       return 1
     fi
@@ -280,13 +298,17 @@ start_webcam_overlay() {
   fi
 
   [[ $target == region:* ]] && echo "${target#region:}" >"$REGION_FILE"
-  omarchy-capture-webcam-resize "$webcam_size"
+  # Omaloom placement already applies both the requested size and position.
+  # Do not run Omarchy's bottom-right resize first: that produces a visible
+  # double move before the configured placement is applied.
   if [[ -x "$SCRIPT_DIR/omaloom-webcam-placement" ]]; then
     "$SCRIPT_DIR/omaloom-webcam-placement" apply --target "$target" --size "$webcam_size" --position "$webcam_position" || true
   fi
 
-  sleep 1
-  if ! hyprctl clients -j | jq -e 'any(.[]; .title == "WebcamOverlay")' >/dev/null 2>&1 || ! kill -0 "$webcam_pid" 2>/dev/null; then
+  # Mapping plus process liveness is enough to begin the countdown. Its five
+  # seconds provide the camera substantially more warm-up time than the old
+  # unconditional one-second pre-countdown settle delay.
+  if ! webcam_overlay_ready; then
     local message="unable to start webcam overlay"
     if [[ -x "$SCRIPT_DIR/omaloom-webcam-diagnose" ]]; then
       message=$("$SCRIPT_DIR/omaloom-webcam-diagnose" "$webcam_log" 2>/dev/null || printf '%s' "$message")
@@ -381,6 +403,7 @@ start_recording() {
     exit 3
   fi
   emit_source_selected "$target"
+  profile source_selected
   local capture_args=()
   case $target in
     monitor:*) capture_args=(-w "${target#monitor:}" -s "$(default_resolution)") ;;
@@ -388,17 +411,9 @@ start_recording() {
     *) fail "unsupported capture target: $target" ;;
   esac
 
-  # Prepare and place the real mpv webcam overlay before the visible countdown.
-  # This keeps camera startup latency out of the gap between 1 and capture.
-  if [[ $webcam == true ]]; then
-    start_webcam_overlay "$target" "$webcam_device" "$webcam_size" "$webcam_position" || exit 1
-  fi
-
-  countdown
-  emit starting
-  # Give Quickshell a moment to unmap the countdown popup before capture starts.
-  sleep 0.3
-
+  # Complete filesystem and audio validation before camera placement and the
+  # visible countdown. Once the camera reaches its requested corner, no file
+  # preparation remains between that visual event and the first count.
   local audio_devices=""
   local audio_args=()
   if [[ $microphone_audio == true ]] && ! microphone_available "$microphone_device"; then
@@ -425,13 +440,44 @@ start_recording() {
     OUTPUT_RESERVED=""
     fail "could not reserve recording state file"
   fi
-  echo "===== $(date '+%F %T') omaloom target: $target =====" >>"$LOG_FILE"
+  profile recording_prepared
+
+  # Prepare and place the real mpv webcam overlay before the visible countdown.
+  # This keeps camera startup latency out of the gap between 1 and capture.
+  if [[ $webcam == true ]]; then
+    start_webcam_overlay "$target" "$webcam_device" "$webcam_size" "$webcam_position" || exit 1
+  fi
+  profile capture_devices_ready
+
+  countdown
+  profile countdown_complete
+  # The countdown doubles as camera warm-up. Revalidate immediately before
+  # capture so an overlay that failed during those five seconds is never
+  # silently omitted from a recording that explicitly requested it.
+  if [[ $webcam == true ]] && ! webcam_overlay_ready; then
+    cleanup_webcam
+    fail "webcam overlay stopped before recording began"
+  fi
+  emit starting
+  # Allow Quickshell several frames to unmap the countdown before capture.
+  sleep 0.12
+
+  printf '===== %(%F %T)T omaloom target: %s =====\n' -1 "$target" >>"$LOG_FILE"
   gpu-screen-recorder "${capture_args[@]}" -k auto -f 60 -fm cfr -fallback-cpu-encoding yes -o "$filename" "${audio_args[@]}" 2>>"$LOG_FILE" &
   local pid=$!
+  profile recorder_spawned
 
-  sleep 0.8
+  # Treat either initial output or 200 ms of process survival as readiness.
+  # Later failures remain observable through normal status polling instead of
+  # imposing an unconditional 800 ms delay on every successful start.
+  local readiness_checks=0
+  while ((readiness_checks < 20)) && kill -0 "$pid" 2>/dev/null && [[ ! -s $filename ]]; do
+    sleep 0.01
+    readiness_checks=$((readiness_checks + 1))
+  done
 
   if kill -0 "$pid" 2>/dev/null; then
+    profile recording_confirmed
     STATE_RETAIN=true
     WEBCAM_RETAIN=true
     OUTPUT_RESERVED=""

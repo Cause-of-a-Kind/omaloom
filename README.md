@@ -73,8 +73,7 @@ Click the clapperboard icon
 → for region capture, select the source/area
 → region captures immediately show an outside-only guide while webcam prep and countdown run
 → see the large 5, 4, 3, 2, 1 countdown
-→ the bar briefly shows GO while capture launches
-→ recording begins and the bar shows REC
+→ 1 remains visible while capture launches, then changes directly to REC
 → stop with Omarchy's top-center recording control
 → use Library actions to Open, Reveal, or Copy path for saved MP4s
 ```
@@ -139,7 +138,7 @@ All QML-to-helper calls pass argv arrays, not shell-concatenated commands.
 
 ## Security notes
 
-Omaloom keeps compatibility with Omarchy's stock top-center stop control, which expects the active recording path at `/tmp/omarchy-screenrecord-filename`. `bin/omaloom-state` manages that fixed path safely: it rejects symlinks, FIFOs, wrong-owner or hard-linked entries, replaces only an owned stale regular file, atomically creates the state file with no-follow/exclusive flags where available, writes mode `0600`, validates reads for status, and removes only owner-validated regular state on startup failure.
+Omaloom keeps compatibility with Omarchy's stock top-center stop control, which expects the active recording path at `/tmp/omarchy-screenrecord-filename`. `bin/omaloom-state` manages that fixed path safely: it rejects symlinks, FIFOs, wrong-owner or hard-linked entries, refuses to replace an existing reservation, atomically creates the state file with no-follow/exclusive flags where available, writes mode `0600`, validates reads for status, and removes only owner-validated regular state on startup failure.
 
 Recording output paths are reserved by `bin/omaloom-output` with unpredictable names and `O_CREAT|O_EXCL|O_NOFOLLOW` in the selected folder. For safety, the final output folder must already exist, be owned by the current user, and not be group/world writable; ordinary private folders and Dropbox-style `0755` folders are supported. Runtime debug logs, webcam PID state, and the Omarchy-compatible region basename live under a validated private per-user runtime directory, not shared `/tmp`. Omaloom validates the webcam PID file and target process before signaling, uses controlled command lookup for helper subprocesses, and installs startup cleanup traps before selection/countdown.
 

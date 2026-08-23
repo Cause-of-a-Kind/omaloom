@@ -59,7 +59,7 @@ def reserve(path: str, value: str) -> int:
     st = lstat_existing(path)
     if st is not None:
         validate_existing_regular(path)
-        os.unlink(path)
+        raise StateError("state path is already reserved")
 
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow_flag()
     try:

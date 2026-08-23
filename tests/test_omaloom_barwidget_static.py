@@ -36,6 +36,26 @@ def test_camera_selection_toggle_loading_and_single_setup_status_text():
     assert "root.lastMessage\n      color:" not in text
 
 
+def test_preparation_and_starting_never_flash_setup_dashboard():
+    text = BAR.read_text(encoding="utf-8")
+    source_block = text[text.index('if (text.indexOf(\'"source_selected"\')'):text.index('else if (text.indexOf(\'"countdown"\')')]
+    countdown_block = text[text.index('else if (text.indexOf(\'"countdown"\')'):text.index('else if (text.indexOf(\'"event":"starting"\')')]
+    starting_block = text[text.index('else if (text.indexOf(\'"event":"starting"\')'):text.index('else if (text.indexOf(\'"recording_started"\')')]
+    assert "root.open()" not in source_block
+    assert "if (!root.opened) root.open()" in countdown_block
+    assert starting_block.index("root.close()") < starting_block.index('state = "starting"')
+    assert "visible: root.countdown || root.starting" in text
+    assert "visible: !root.countdown && !root.starting" in text
+
+
+def test_countdown_transitions_from_one_directly_to_confirmed_rec():
+    text = BAR.read_text(encoding="utf-8")
+    widget = text[text.index("WidgetButton {"):text.index("KeyboardPanel {")]
+    assert 'root.countdown || root.starting ? String(root.countdownRemaining)' in widget
+    assert 'root.recording ? "REC"' in widget
+    assert '"GO"' not in text
+
+
 def test_camera_busy_warning_and_structured_backend_error_reopen():
     text = BAR.read_text(encoding="utf-8")
     warning = "Camera is in use by another application. Close it or choose a different camera."
@@ -52,5 +72,7 @@ def test_camera_busy_warning_and_structured_backend_error_reopen():
 if __name__ == "__main__":
     test_camera_availability_state_machine_and_poll_no_flicker()
     test_camera_selection_toggle_loading_and_single_setup_status_text()
+    test_preparation_and_starting_never_flash_setup_dashboard()
+    test_countdown_transitions_from_one_directly_to_confirmed_rec()
     test_camera_busy_warning_and_structured_backend_error_reopen()
     print("bar widget static tests passed")

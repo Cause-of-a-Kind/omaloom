@@ -2,6 +2,26 @@
 
 All notable changes to Omaloom are documented here.
 
+## 0.1.4 — 2026-08-23
+
+### Performance
+
+- Keep one FFmpeg microphone-meter process alive while setup is open, cutting first-level latency and eliminating repeated process/device initialization.
+- Move secure output/state and audio preparation before webcam placement and countdown.
+- Replace the fixed 800 ms recorder survival delay with bounded process/output readiness and reduce popup-unmap delays.
+- Remove duplicate webcam placement, redundant camera ownership work, and the fixed one-second pre-countdown settle delay.
+
+### Changed
+
+- Keep setup closed during backend preparation, render only the dedicated countdown pane, and transition directly from `1` to confirmed `REC` without `GO` or settings flashes.
+- Start countdown immediately after the webcam reaches its configured position while using countdown as camera warm-up time.
+
+### Security
+
+- Make Omarchy's fixed stop-state reservation strictly exclusive so concurrent starts cannot replace one another.
+- Tie the persistent FFmpeg meter to its Python parent's lifetime and revalidate webcam mapping/liveness immediately before capture.
+- Add regression coverage for concurrent state reservation, orphan prevention, fast-path ordering, and flash-free QML transitions.
+
 ## 0.1.3 — 2026-08-21
 
 ### Security

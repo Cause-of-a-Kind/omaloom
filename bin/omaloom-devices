@@ -2,19 +2,34 @@
 """Device discovery and lightweight setup-preview helpers for Omaloom."""
 from __future__ import annotations
 
+import ctypes
 import json
 import math
 import os
 import pathlib
 import re
+import selectors
 import shutil
 import signal
 import stat
 import subprocess
 import sys
+import time
 from typing import Any
 
 CONTROLLED_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/share/omarchy/bin"
+PR_SET_PDEATHSIG = 1
+LIBC = ctypes.CDLL(None, use_errno=True)
+
+
+def terminate_with_parent() -> None:
+    """Ensure the long-lived FFmpeg meter cannot outlive this helper."""
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    if LIBC.prctl(PR_SET_PDEATHSIG, signal.SIGTERM, 0, 0, 0) != 0:
+        os._exit(127)
+    # Close the fork/prctl race if the parent exited before prctl completed.
+    if os.getppid() == 1:
+        os._exit(127)
 
 
 def which(command: str) -> str | None:
@@ -161,7 +176,17 @@ def check_camera(device: str) -> int:
     return 0
 
 
+def meter_level(db_text: str) -> float:
+    """Map FFmpeg RMS dB output onto the setup meter's perceptual range."""
+    db = -90.0 if db_text in ("-inf", "inf") else float(db_text)
+    # Keep quiet but real microphone activity visible. A -60 dB floor made
+    # normal USB mic speech/noise collapse to zero and look frozen.
+    level = max(0.0, min(1.0, (db + 72.0) / 60.0))
+    return round(math.sqrt(level), 3)
+
+
 def meter(device: str) -> int:
+    """Stream levels from one FFmpeg process for the popup's lifetime."""
     ffmpeg = which("ffmpeg")
     if not ffmpeg:
         return 1
@@ -177,44 +202,74 @@ def meter(device: str) -> int:
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
 
-    pattern = re.compile(r"RMS level dB:\s*(-?inf|-?\d+(?:\.\d+)?)")
-    while running:
-        # ffmpeg's ametadata output can be block-buffered when read from QML.
-        # Short, argv-only samples provide reliable live levels while the setup
-        # popup is open and release the source promptly between samples.
-        proc = subprocess.run(
-            [
-                ffmpeg,
-                "-hide_banner",
-                "-nostdin",
-                "-f",
-                "pulse",
-                "-i",
-                device,
-                "-t",
-                "0.25",
-                "-vn",
-                "-af",
-                "astats=metadata=0:reset=0.25",
-                "-f",
-                "null",
-                "-",
-            ],
-            text=True,
-            capture_output=True,
-            timeout=2,
-        )
-        levels = pattern.findall(proc.stderr or "")
-        if not levels:
-            emit({"level": 0})
-            continue
-        value = levels[-1]
-        db = -90.0 if value in ("-inf", "inf") else float(value)
-        # Keep quiet but real microphone activity visible. A -60 dB floor made
-        # normal USB mic speech/noise collapse to zero and look frozen.
-        level = max(0.0, min(1.0, (db + 72.0) / 60.0))
-        emit({"level": round(math.sqrt(level), 3)})
-    return 0
+    # ametadata writes one machine-readable RMS line per audio frame to stdout.
+    # Keep FFmpeg alive instead of paying process/device initialization costs
+    # four times per second, then throttle JSON events to a smooth ~12.5 Hz.
+    proc = subprocess.Popen(
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-nostdin",
+            "-f",
+            "pulse",
+            "-i",
+            device,
+            "-vn",
+            "-af",
+            "astats=metadata=1:reset=10,"
+            "ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-:direct=1",
+            "-f",
+            "null",
+            "-",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        bufsize=0,
+        preexec_fn=terminate_with_parent,
+    )
+    if proc.stdout is None:
+        proc.terminate()
+        return 1
+
+    pattern = re.compile(r"^lavfi\.astats\.Overall\.RMS_level=(-?inf|-?\d+(?:\.\d+)?)$")
+    selector = selectors.DefaultSelector()
+    selector.register(proc.stdout, selectors.EVENT_READ)
+    last_emit = 0.0
+    peak = 0.0
+    saw_sample = False
+    buffered = b""
+    try:
+        while running and proc.poll() is None:
+            events = selector.select(timeout=0.2)
+            if not events:
+                continue
+            chunk = os.read(proc.stdout.fileno(), 65536)
+            if not chunk:
+                break
+            buffered += chunk
+            lines = buffered.split(b"\n")
+            buffered = lines.pop()
+            for raw_line in lines:
+                match = pattern.match(raw_line.decode("ascii", "replace").strip())
+                if match:
+                    peak = max(peak, meter_level(match.group(1)))
+                    saw_sample = True
+            now = time.monotonic()
+            if saw_sample and now - last_emit >= 0.08:
+                emit({"level": peak})
+                peak = 0.0
+                saw_sample = False
+                last_emit = now
+    finally:
+        selector.close()
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=0.5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+    return 0 if not running or proc.returncode in (0, -signal.SIGTERM) else 1
 
 
 def main(argv: list[str]) -> int:

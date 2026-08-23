@@ -401,18 +401,20 @@ Panel {
       countdownRemaining = 5
       maybeShowRegionGuide(event)
       lastMessage = omaloomSettings.recordWebcam ? "Preparing webcam overlay…" : "Preparing recording…"
-      root.open()
+      // Keep setup closed while backend preparation and webcam placement run.
+      // Reopen only once a countdown event can render the dedicated pane.
       startTimeout.restart()
     } else if (text.indexOf('"countdown"') !== -1) {
       var seconds = extractJsonString(text, "seconds")
       countdownRemaining = parseInt(seconds || "0")
       state = "countdown"
       lastMessage = "Recording starts in " + seconds + "…"
+      if (!root.opened) root.open()
     } else if (text.indexOf('"event":"starting"') !== -1) {
-      state = "starting"
       lastMessage = "Starting recording…"
       root.close()
       root.controller.hide()
+      state = "starting"
     } else if (text.indexOf('"recording_started"') !== -1) {
       state = "recording"
       var startedPath = extractJsonString(text, "path")
@@ -466,11 +468,15 @@ Panel {
 
   onOpenedChanged: {
     if (opened) {
-      if (omaloomSettings.recordWebcam) resetWebcamAvailability()
-      refreshDevices()
-      restartMeterForSelectedDevice()
       dashboardTab = "record"
-      if (!busy) refreshRecordings()
+      // Countdown uses this panel only as a presentation surface. Do not
+      // restart setup cameras, meters, discovery, or library work behind it.
+      if (!busy) {
+        if (omaloomSettings.recordWebcam) resetWebcamAvailability()
+        refreshDevices()
+        restartMeterForSelectedDevice()
+        refreshRecordings()
+      }
     } else {
       microphoneLevel = 0
       microphoneListOpen = false
@@ -576,7 +582,7 @@ Panel {
 
   Timer {
     id: startDelay
-    interval: 200
+    interval: 100
     repeat: false
     onTriggered: root.launchPendingRecording()
   }
@@ -829,7 +835,7 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.countdown ? String(root.countdownRemaining) : (root.starting ? "GO" : (root.recording ? "REC" : "󰿎"))
+    text: root.countdown || root.starting ? String(root.countdownRemaining) : (root.recording ? "REC" : "󰿎")
     fontSize: (!root.countdown && !root.starting && !root.recording) ? Style.font.title : Style.font.body
     active: root.recording || root.countdown || root.starting
     tooltipText: root.recording ? "Recording — use the Omarchy stop button at the top center" : (root.countdown ? "Recording starts in " + root.countdownRemaining : (root.selecting ? "Select a source/region" : (root.preparing ? "Preparing recording…" : (root.starting ? "Starting recording…" : "Open Omaloom"))))
@@ -844,7 +850,7 @@ Panel {
       textFormat: Text.PlainText
       visible: root.bar && root.bar.vertical === true
       anchors.centerIn: parent
-      text: root.countdown ? String(root.countdownRemaining) : (root.starting ? "▶" : (root.recording ? "●" : "󰿎"))
+      text: root.countdown || root.starting ? String(root.countdownRemaining) : (root.recording ? "●" : "󰿎")
       color: root.recording ? Color.urgent : button.foreground
       font.family: button.fontFamily
       font.pixelSize: (!root.countdown && !root.starting && !root.recording) ? button.fontSize * 1.12 : button.fontSize
@@ -860,8 +866,8 @@ Panel {
     centerOnBar: true
     readonly property bool narrowDashboard: contentWidth < Style.space(760)
 
-    contentWidth: popup.fittedContentWidth(root.countdown ? Style.space(460) : Style.space(920))
-    contentHeight: popup.fittedContentHeight(root.countdown ? Style.space(360) : Style.space(800), Style.space(840))
+    contentWidth: popup.fittedContentWidth(root.countdown || root.starting ? Style.space(460) : Style.space(920))
+    contentHeight: popup.fittedContentHeight(root.countdown || root.starting ? Style.space(360) : Style.space(800), Style.space(840))
 
     Item {
       id: dashboardRoot
@@ -869,7 +875,7 @@ Panel {
 
       Column {
         id: countdownPane
-        visible: root.countdown
+        visible: root.countdown || root.starting
         anchors.centerIn: parent
         width: parent.width
         spacing: Style.space(14)
@@ -910,7 +916,7 @@ Panel {
 
       Column {
         id: dashboard
-        visible: !root.countdown
+        visible: !root.countdown && !root.starting
         anchors.fill: parent
         spacing: Style.space(12)
 
@@ -949,7 +955,7 @@ Panel {
             textFormat: Text.PlainText
             id: statusText
             anchors.verticalCenter: parent.verticalCenter
-            text: root.recording ? "REC" : (root.preparing ? "PREP" : (root.starting ? "GO" : (root.recordingsLoading ? "SYNC" : "READY")))
+            text: root.recording ? "REC" : (root.preparing ? "PREP" : (root.starting ? "START" : (root.recordingsLoading ? "SYNC" : "READY")))
             color: root.recording ? Color.urgent : root.contentForeground
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.bodySmall
