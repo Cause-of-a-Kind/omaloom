@@ -16,6 +16,18 @@ def test_configuration_is_not_blocked_by_camera_recording_readiness():
     assert text.count("enabled: root.canStart") == 1
 
 
+def test_record_setup_scrolls_within_small_popup_height():
+    text = BAR.read_text(encoding="utf-8")
+    record = text[text.index("component RecordDashboardColumn:"):text.index("component LibraryDashboardColumn:")]
+    assert "component RecordDashboardColumn: Item" in record
+    assert "Flickable {" in record
+    assert "contentHeight: recordColumn.implicitHeight" in record
+    assert "interactive: contentHeight > height" in record
+    assert "boundsBehavior: Flickable.StopAtBounds" in record
+    assert "ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }" in record
+    assert 'label: root.state === "error" || root.state === "saved" ? "Start again" : "Start recording"' in record
+
+
 def test_folder_picker_launches_only_after_overlay_unmaps():
     text = BAR.read_text(encoding="utf-8")
     open_block = text[text.index("function openFolderPicker() {"):text.index("function launchFolderPicker() {")]
@@ -102,6 +114,7 @@ def test_camera_busy_warning_and_structured_backend_error_reopen():
 
 if __name__ == "__main__":
     test_configuration_is_not_blocked_by_camera_recording_readiness()
+    test_record_setup_scrolls_within_small_popup_height()
     test_folder_picker_launches_only_after_overlay_unmaps()
     test_first_run_requires_valid_explicit_output_folder()
     test_camera_availability_state_machine_and_poll_no_flicker()

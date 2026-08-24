@@ -1098,10 +1098,26 @@ Panel {
     }
   }
 
-  component RecordDashboardColumn: Column {
-    id: recordColumn
+  component RecordDashboardColumn: Item {
+    id: recordViewport
     property bool previewTargetActive: false
-    spacing: Style.space(10)
+    clip: true
+
+    Flickable {
+      id: recordFlickable
+      anchors.fill: parent
+      contentWidth: width
+      contentHeight: recordColumn.implicitHeight
+      interactive: contentHeight > height
+      boundsBehavior: Flickable.StopAtBounds
+      flickableDirection: Flickable.VerticalFlick
+      ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+      Column {
+        id: recordColumn
+        width: recordFlickable.width - Style.space(8)
+        property bool previewTargetActive: recordViewport.previewTargetActive
+        spacing: Style.space(10)
 
     Text {
       textFormat: Text.PlainText
@@ -1325,6 +1341,8 @@ Panel {
       label: root.state === "error" || root.state === "saved" ? "Start again" : "Start recording"
       enabled: root.canStart
       onClicked: root.startRecording()
+    }
+      }
     }
   }
 

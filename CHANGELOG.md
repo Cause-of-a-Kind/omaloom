@@ -2,6 +2,13 @@
 
 All notable changes to Omaloom are documented here.
 
+## 0.1.8 — 2026-08-23
+
+### Fixed
+
+- Constrain the Record setup column to the popup's available height and add vertical wheel/touch scrolling with an as-needed scrollbar.
+- Keep webcam options, previews, status, and Start recording reachable on smaller laptop displays without changing the full-size dashboard layout.
+
 ## 0.1.7 — 2026-08-23
 
 ### Fixed
