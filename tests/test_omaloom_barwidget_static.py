@@ -9,11 +9,22 @@ def test_configuration_is_not_blocked_by_camera_recording_readiness():
     text = BAR.read_text(encoding="utf-8")
     assert "readonly property bool canConfigure:" in text
     assert "readonly property bool canStart: canConfigure && outputDirectoryReady && !webcamBlocksStart" in text
-    assert "if (folderPickerProcess.running || !canConfigure) return" in text
+    assert "if (folderPickerProcess.running || folderPickerLaunchDelay.running || !canConfigure) return" in text
     folder = text[text.index('label: "Folder"'):text.index('label: "Current monitor / fullscreen"')]
     assert "enabled: root.canConfigure" in folder
     assert "enabled: root.canStart" not in folder
     assert text.count("enabled: root.canStart") == 1
+
+
+def test_folder_picker_launches_only_after_overlay_unmaps():
+    text = BAR.read_text(encoding="utf-8")
+    open_block = text[text.index("function openFolderPicker() {"):text.index("function launchFolderPicker() {")]
+    launch_block = text[text.index("function launchFolderPicker() {"):text.index("function hideRegionGuide() {")]
+    assert open_block.index("root.close()") < open_block.index("folderPickerLaunchDelay.restart()")
+    assert "folderPickerProcess.running = true" not in open_block
+    assert 'folderPickerProcess.command = [folderPicker, "--current", omaloomSettings.outputDirectory]' in launch_block
+    assert "id: folderPickerLaunchDelay" in text
+    assert "interval: 180" in text
 
 
 def test_first_run_requires_valid_explicit_output_folder():
@@ -91,6 +102,7 @@ def test_camera_busy_warning_and_structured_backend_error_reopen():
 
 if __name__ == "__main__":
     test_configuration_is_not_blocked_by_camera_recording_readiness()
+    test_folder_picker_launches_only_after_overlay_unmaps()
     test_first_run_requires_valid_explicit_output_folder()
     test_camera_availability_state_machine_and_poll_no_flicker()
     test_camera_selection_toggle_loading_and_single_setup_status_text()

@@ -28,7 +28,7 @@ Panel {
   readonly property bool busy: selecting || preparing || countdown || starting || recording
   readonly property bool webcamBlocksStart: omaloomSettings.recordWebcam && webcamAvailabilityState !== "ready"
   readonly property bool outputDirectoryReady: omaloomSettings.outputDirectory !== "" && outputDirectoryState === "ready" && outputDirectoryValidationTarget === omaloomSettings.outputDirectory
-  readonly property bool canConfigure: !startDelay.running && !actionProcess.running && !busy
+  readonly property bool canConfigure: !startDelay.running && !folderPickerLaunchDelay.running && !actionProcess.running && !busy
   readonly property bool canStart: canConfigure && outputDirectoryReady && !webcamBlocksStart
   readonly property bool setupResourcesActive: root.opened && !root.busy
   readonly property bool previewActive: setupResourcesActive && omaloomSettings.recordWebcam && mediaDevices.videoInputs.length > 0
@@ -158,11 +158,17 @@ Panel {
   }
 
   function openFolderPicker() {
-    if (folderPickerProcess.running || !canConfigure) return
-    // The external portal window takes focus, so KeyboardPanel dismisses the
-    // setup popup. Restore it after selection/cancellation to keep the user in
-    // the same setup flow.
+    if (folderPickerProcess.running || folderPickerLaunchDelay.running || !canConfigure) return
+    // KeyboardPanel is always on top and can cover a portal dialog on smaller
+    // displays. Unmap it before launching the picker, then restore setup after
+    // selection/cancellation.
     reopenAfterFolderPicker = true
+    root.close()
+    folderPickerLaunchDelay.restart()
+  }
+
+  function launchFolderPicker() {
+    if (!reopenAfterFolderPicker || folderPickerProcess.running || root.busy) return
     folderPickerProcess.command = [folderPicker, "--current", omaloomSettings.outputDirectory]
     folderPickerProcess.running = true
   }
@@ -602,6 +608,13 @@ Panel {
     repeat: true
     running: root.opened && root.setupResourcesActive && omaloomSettings.recordWebcam
     onTriggered: root.refreshWebcamAvailability()
+  }
+
+  Timer {
+    id: folderPickerLaunchDelay
+    interval: 180
+    repeat: false
+    onTriggered: root.launchFolderPicker()
   }
 
   Timer {

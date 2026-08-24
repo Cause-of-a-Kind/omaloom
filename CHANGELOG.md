@@ -2,6 +2,13 @@
 
 All notable changes to Omaloom are documented here.
 
+## 0.1.7 — 2026-08-23
+
+### Fixed
+
+- Explicitly unmap Omaloom before launching the portal folder picker so the always-on-top setup panel cannot cover the dialog on smaller displays.
+- Restore the setup panel after folder selection or cancellation.
+
 ## 0.1.6 — 2026-08-23
 
 ### Changed
