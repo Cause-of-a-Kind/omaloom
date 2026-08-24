@@ -56,6 +56,16 @@ def test_countdown_fast_path_is_prepared_and_event_checked():
     assert "sleep 0.12" in start
 
 
+def test_recording_requires_preselected_existing_output_directory():
+    text = RECORDER.read_text(encoding="utf-8")
+    start = text[text.index("start_recording() {"):text.index("stop_recording() {")]
+    assert 'local directory=""' in start
+    assert 'fail "choose an output directory before recording"' in start
+    assert 'fail "selected output directory does not exist:' in start
+    assert "mkdir -p" not in start
+    assert "DEFAULT_DIR" not in text
+
+
 def test_webcam_cleanup_does_not_use_broad_pkill():
     text = RECORDER.read_text(encoding="utf-8")
     assert "pkill -f 'WebcamOverlay'" not in text
@@ -67,5 +77,6 @@ if __name__ == "__main__":
     test_start_recording_installs_cleanup_trap_before_effects()
     test_webcam_preparation_has_single_placement_and_no_settle_sleep()
     test_countdown_fast_path_is_prepared_and_event_checked()
+    test_recording_requires_preselected_existing_output_directory()
     test_webcam_cleanup_does_not_use_broad_pkill()
     print("recorder static tests passed")

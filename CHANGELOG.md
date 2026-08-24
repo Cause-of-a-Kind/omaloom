@@ -2,6 +2,14 @@
 
 All notable changes to Omaloom are documented here.
 
+## 0.1.6 — 2026-08-23
+
+### Changed
+
+- Require explicit portal-backed output-folder selection on first use instead of assuming or creating `~/Videos/Omaloom`.
+- Keep Start disabled until the selected folder exists and passes Omaloom's output-directory safety validation.
+- Preserve existing users' saved output folders, but fail closed if a saved folder is removed or becomes unsafe.
+
 ## 0.1.5 — 2026-08-23
 
 ### Fixed

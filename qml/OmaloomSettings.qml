@@ -6,7 +6,7 @@ Item {
   id: root
 
   readonly property string home: Quickshell.env("HOME")
-  readonly property string defaultDirectory: home + "/Videos/Omaloom"
+  readonly property string defaultDirectory: ""
   readonly property string settingsPath: home + "/.config/omaloom/settings.json"
   readonly property string installedSettingsHelper: home + "/.config/omarchy/plugins/coak.omaloom/bin/omaloom-settings"
 

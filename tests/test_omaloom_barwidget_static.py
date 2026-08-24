@@ -8,12 +8,21 @@ BAR = ROOT / "qml" / "BarWidget.qml"
 def test_configuration_is_not_blocked_by_camera_recording_readiness():
     text = BAR.read_text(encoding="utf-8")
     assert "readonly property bool canConfigure:" in text
-    assert "readonly property bool canStart: canConfigure && !webcamBlocksStart" in text
+    assert "readonly property bool canStart: canConfigure && outputDirectoryReady && !webcamBlocksStart" in text
     assert "if (folderPickerProcess.running || !canConfigure) return" in text
     folder = text[text.index('label: "Folder"'):text.index('label: "Current monitor / fullscreen"')]
     assert "enabled: root.canConfigure" in folder
     assert "enabled: root.canStart" not in folder
     assert text.count("enabled: root.canStart") == 1
+
+
+def test_first_run_requires_valid_explicit_output_folder():
+    text = BAR.read_text(encoding="utf-8")
+    assert 'property string outputDirectoryState: "missing"' in text
+    assert 'value: omaloomSettings.outputDirectory === "" ? "Choose a folder"' in text
+    assert '[outputHelper, "validate-directory", directory]' in text
+    assert 'return "Choose an output folder before recording."' in text
+    assert "outputDirectoryReady" in text
 
 
 def test_camera_availability_state_machine_and_poll_no_flicker():
@@ -82,6 +91,7 @@ def test_camera_busy_warning_and_structured_backend_error_reopen():
 
 if __name__ == "__main__":
     test_configuration_is_not_blocked_by_camera_recording_readiness()
+    test_first_run_requires_valid_explicit_output_folder()
     test_camera_availability_state_machine_and_poll_no_flicker()
     test_camera_selection_toggle_loading_and_single_setup_status_text()
     test_preparation_and_starting_never_flash_setup_dashboard()

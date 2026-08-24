@@ -80,7 +80,7 @@ Output is newline-delimited JSON-ish events for QML parsing, for example:
 
 Settings are shared through `~/.config/omaloom/settings.json` with these normalized keys:
 
-- `outputDirectory` (string, default `~/Videos/Omaloom`)
+- `outputDirectory` (string, default `""`; first use requires explicit portal selection of an existing safe folder)
 - `fullscreenCurrentMonitor` (boolean, default `false`)
 - `systemAudio` (boolean, default `true`)
 - `microphone` (boolean, default `true`)
@@ -142,4 +142,4 @@ Behavioral rules for the baseline:
 - Omarchy's top-center control owns stop for v1.
 - Omarchy owns stop, finalization, thumbnail generation, notification, and webcam cleanup.
 
-Future iterations may add richer preview controls and device-specific tuning, but should keep this shared settings file as the source of truth and preserve the default recording directory at `~/Videos/Omaloom`.
+Future iterations may add richer preview controls and device-specific tuning, but should keep this shared settings file as the source of truth and preserve explicit user ownership of output-folder selection.

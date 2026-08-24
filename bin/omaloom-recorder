@@ -4,7 +4,6 @@ set -o pipefail
 export PATH="/usr/local/bin:/usr/bin:/bin:/usr/share/omarchy/bin"
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-DEFAULT_DIR="$HOME/Videos/Omaloom"
 RECORDING_FILE="/tmp/omarchy-screenrecord-filename"
 STATE_HELPER="$SCRIPT_DIR/omaloom-state"
 OUTPUT_HELPER="$SCRIPT_DIR/omaloom-output"
@@ -328,7 +327,7 @@ toggle_screenrecording_indicator() {
 }
 
 start_recording() {
-  local directory=$DEFAULT_DIR
+  local directory=""
   local fullscreen=false
   local desktop_audio=false
   local microphone_audio=false
@@ -387,10 +386,11 @@ start_recording() {
 
   case $webcam_size in small|medium|large) ;; *) fail "invalid webcam size: $webcam_size" ;; esac
   case $webcam_position in top-left|top-right|bottom-left|bottom-right) ;; *) fail "invalid webcam position: $webcam_position" ;; esac
+  [[ -n $directory ]] || fail "choose an output directory before recording"
 
   command -v gpu-screen-recorder >/dev/null 2>&1 || fail "gpu-screen-recorder command not found"
   command -v omarchy-capture-region >/dev/null 2>&1 || fail "omarchy-capture-region command not found"
-  [[ -d $directory ]] || mkdir -p "$directory" || fail "could not create recording directory: $directory"
+  [[ -d $directory ]] || fail "selected output directory does not exist: $directory"
 
   if is_recording; then
     emit error message "screen recording is already active"

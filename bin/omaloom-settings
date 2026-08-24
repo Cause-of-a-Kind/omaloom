@@ -18,7 +18,7 @@ import tempfile
 from typing import Any
 
 DEFAULTS: dict[str, Any] = {
-    "outputDirectory": str(pathlib.Path.home() / "Videos" / "Omaloom"),
+    "outputDirectory": "",
     "fullscreenCurrentMonitor": False,
     "systemAudio": True,
     "microphone": True,

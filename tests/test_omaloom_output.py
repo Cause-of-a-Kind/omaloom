@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import importlib.machinery
 import importlib.util
+import json
 import os
 import pathlib
 import stat
@@ -17,6 +18,19 @@ loader.exec_module(module)
 
 def cli_reserve(directory):
     return pathlib.Path(subprocess.run([str(HELPER), "reserve", str(directory)], text=True, capture_output=True, check=True).stdout.strip())
+
+
+def test_validate_directory_cli_reports_existing_and_rejects_missing():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        os.chmod(root, 0o755)
+        proc = subprocess.run([str(HELPER), "validate-directory", str(root)], text=True, capture_output=True, check=True)
+        payload = json.loads(proc.stdout)
+        assert payload == {"valid": True, "requested": str(root), "directory": str(root.resolve())}
+        missing = root / "not-created"
+        failed = subprocess.run([str(HELPER), "validate-directory", str(missing)], text=True, capture_output=True)
+        assert failed.returncode == 2
+        assert not missing.exists()
 
 
 def test_reserve_unique_mode_0600_and_remove():
@@ -107,6 +121,7 @@ def test_owned_mode_755_directory_ok_and_exclusive_existing_name_fails():
 
 
 if __name__ == "__main__":
+    test_validate_directory_cli_reports_existing_and_rejects_missing()
     test_reserve_unique_mode_0600_and_remove()
     test_reject_final_group_world_writable_and_nonregular_remove()
     test_reject_ancestor_group_world_writable_nonsticky()

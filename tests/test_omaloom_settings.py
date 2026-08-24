@@ -20,7 +20,7 @@ def test_absent_and_malformed_defaults_then_merge_set():
         home = pathlib.Path(tmp)
         defaults = json.loads(run(home, "load").stdout)
         assert defaults == {
-            "outputDirectory": str(home / "Videos" / "Omaloom"),
+            "outputDirectory": "",
             "fullscreenCurrentMonitor": False,
             "systemAudio": True,
             "microphone": True,
@@ -35,6 +35,11 @@ def test_absent_and_malformed_defaults_then_merge_set():
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         settings_path.write_text('{"systemAudio": "yes", broken', encoding="utf-8")
         assert json.loads(run(home, "load").stdout) == defaults
+
+        chosen = home / "Chosen recordings"
+        chosen.mkdir()
+        after_folder = json.loads(run(home, "set", "outputDirectory", str(chosen)).stdout)
+        assert after_folder["outputDirectory"] == str(chosen)
 
         after_audio = json.loads(run(home, "set", "systemAudio", "false").stdout)
         after_device = json.loads(run(home, "set", "microphoneDevice", "alsa_input.test").stdout)

@@ -15,6 +15,7 @@ Panel {
   readonly property string home: Quickshell.env("HOME")
   readonly property string recorder: home + "/.config/omarchy/plugins/coak.omaloom/bin/omaloom-recorder"
   readonly property string devicesHelper: home + "/.config/omarchy/plugins/coak.omaloom/bin/omaloom-devices"
+  readonly property string outputHelper: home + "/.config/omarchy/plugins/coak.omaloom/bin/omaloom-output"
   readonly property string folderPicker: home + "/.config/omarchy/plugins/coak.omaloom/bin/omaloom-folder-picker"
   readonly property string recordingsHelper: home + "/.config/omarchy/plugins/coak.omaloom/bin/omaloom-recordings"
   // Elm-ish model: state is owned by backend observations. The backend owns
@@ -26,8 +27,9 @@ Panel {
   readonly property bool recording: state === "recording"
   readonly property bool busy: selecting || preparing || countdown || starting || recording
   readonly property bool webcamBlocksStart: omaloomSettings.recordWebcam && webcamAvailabilityState !== "ready"
+  readonly property bool outputDirectoryReady: omaloomSettings.outputDirectory !== "" && outputDirectoryState === "ready" && outputDirectoryValidationTarget === omaloomSettings.outputDirectory
   readonly property bool canConfigure: !startDelay.running && !actionProcess.running && !busy
-  readonly property bool canStart: canConfigure && !webcamBlocksStart
+  readonly property bool canStart: canConfigure && outputDirectoryReady && !webcamBlocksStart
   readonly property bool setupResourcesActive: root.opened && !root.busy
   readonly property bool previewActive: setupResourcesActive && omaloomSettings.recordWebcam && mediaDevices.videoInputs.length > 0
   readonly property color contentForeground: bar ? bar.foreground : Color.foreground
@@ -52,6 +54,9 @@ Panel {
   property string webcamAvailabilityState: "disabled"
   property string webcamAvailabilityDevice: ""
   property string webcamAvailabilityStatus: ""
+  property string outputDirectoryState: "missing"
+  property string outputDirectoryValidationTarget: ""
+  property string outputDirectoryError: ""
   property bool guideActive: false
   property var currentGuide: null
   property bool reopenAfterFolderPicker: false
@@ -97,7 +102,8 @@ Panel {
 
   function startRecording() {
     if (!canStart) {
-      if (webcamBlocksStart && cameraSetupStatusText() !== "") lastMessage = cameraSetupStatusText()
+      if (!outputDirectoryReady) lastMessage = outputDirectoryState === "checking" ? "Checking output folder…" : "Choose an existing output folder before recording."
+      else if (webcamBlocksStart && cameraSetupStatusText() !== "") lastMessage = cameraSetupStatusText()
       return
     }
     var args = [recorder, "start", "--directory", omaloomSettings.outputDirectory]
@@ -130,6 +136,25 @@ Panel {
     actionProcess.command = pendingStartArgs
     actionProcess.running = true
     startRefreshDelay.restart()
+  }
+
+  function refreshOutputDirectory() {
+    var directory = String(omaloomSettings.outputDirectory || "")
+    outputDirectoryError = ""
+    if (outputDirectoryProcess.running) {
+      outputDirectoryState = "checking"
+      return
+    }
+    outputDirectoryValidationTarget = directory
+    if (directory === "") {
+      outputDirectoryState = "missing"
+      recordings = []
+      recordingsError = ""
+      return
+    }
+    outputDirectoryState = "checking"
+    outputDirectoryProcess.command = [outputHelper, "validate-directory", directory]
+    outputDirectoryProcess.running = true
   }
 
   function openFolderPicker() {
@@ -176,7 +201,7 @@ Panel {
   }
 
   function refreshRecordings() {
-    if (recordingsProcess.running || busy) return
+    if (recordingsProcess.running || busy || !outputDirectoryReady) return
     recordingsLoading = true
     recordingsError = ""
     recordingsProcess.command = [recordingsHelper, "list", "--directory", omaloomSettings.outputDirectory, "--limit", "0"]
@@ -215,6 +240,11 @@ Panel {
 
   function displayedStatusText() {
     if (root.busy || root.recording || root.state === "saved") return lastMessage
+    if (!outputDirectoryReady) {
+      if (outputDirectoryState === "checking") return "Checking output folder…"
+      if (outputDirectoryState === "invalid") return outputDirectoryError || "Selected output folder is unavailable. Choose another folder."
+      return "Choose an output folder before recording."
+    }
     if (omaloomSettings.recordWebcam) return cameraSetupStatusText()
     return lastMessage
   }
@@ -222,6 +252,7 @@ Panel {
   function displayedStatusUrgent() {
     if (root.state === "error") return true
     if (root.busy || root.recording || root.state === "saved") return false
+    if (outputDirectoryState === "invalid") return true
     return omaloomSettings.recordWebcam && (webcamAvailabilityState === "busy" || webcamAvailabilityState === "error")
   }
 
@@ -497,6 +528,7 @@ Panel {
 
   OmaloomSettings {
     id: omaloomSettings
+    onInitializedChanged: if (initialized) root.refreshOutputDirectory()
     onRecordMicrophoneChanged: root.updateMeter()
     onRecordWebcamChanged: root.resetWebcamAvailability()
     onMicrophoneDeviceChanged: root.restartMeterForSelectedDevice()
@@ -504,7 +536,7 @@ Panel {
     onOutputDirectoryChanged: {
       root.recordings = []
       root.recordingsError = ""
-      if (root.opened && !root.busy) root.refreshRecordings()
+      if (initialized) root.refreshOutputDirectory()
     }
   }
 
@@ -538,6 +570,7 @@ Panel {
   Component.onDestruction: {
     hideRegionGuide()
     reopenAfterFolderPicker = false
+    if (outputDirectoryProcess.running) outputDirectoryProcess.running = false
     if (folderPickerProcess.running) folderPickerProcess.running = false
     if (meterProcess.running) meterProcess.running = false
     previewSessionLoader.active = false
@@ -605,6 +638,40 @@ Panel {
         root.state = "idle"
         root.lastMessage = "Recording was not started. Ready to record locally."
         root.refresh()
+      }
+    }
+  }
+
+  Process {
+    id: outputDirectoryProcess
+    stdout: SplitParser {
+      onRead: function(line) {
+        try {
+          var payload = JSON.parse(String(line || "{}"))
+          if (payload.valid === true && String(payload.requested || "") === root.outputDirectoryValidationTarget && root.outputDirectoryValidationTarget === omaloomSettings.outputDirectory) {
+            root.outputDirectoryState = "ready"
+            root.outputDirectoryError = ""
+          }
+        } catch (e) {
+          root.outputDirectoryState = "invalid"
+          root.outputDirectoryError = "Could not validate the selected output folder."
+        }
+      }
+    }
+    stderr: SplitParser {
+      onRead: function(line) {
+        try { root.outputDirectoryError = JSON.parse(String(line || "{}")).error || "Selected output folder is unavailable." }
+        catch (e) { root.outputDirectoryError = "Selected output folder is unavailable." }
+      }
+    }
+    onExited: function(exitCode) {
+      if (root.outputDirectoryValidationTarget !== omaloomSettings.outputDirectory) {
+        root.refreshOutputDirectory()
+      } else if (exitCode !== 0) {
+        root.outputDirectoryState = "invalid"
+        if (root.outputDirectoryError === "") root.outputDirectoryError = "Selected output folder is unavailable. Choose another folder."
+      } else if (root.outputDirectoryState === "ready" && root.opened && !root.busy) {
+        root.refreshRecordings()
       }
     }
   }
@@ -1036,7 +1103,7 @@ Panel {
     SelectorRow {
       width: parent.width
       label: "Folder"
-      value: omaloomSettings.outputDirectory
+      value: omaloomSettings.outputDirectory === "" ? "Choose a folder" : omaloomSettings.outputDirectory
       enabled: root.canConfigure
       onActivated: root.openFolderPicker()
     }

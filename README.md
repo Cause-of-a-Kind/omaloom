@@ -80,6 +80,8 @@ Click the clapperboard icon
 
 Current-monitor/fullscreen capture skips the interactive source selector. Region capture uses Omarchy's selector and never draws guide pixels inside the captured region; sides at physical monitor edges are omitted rather than drawn inward.
 
+On first use, Omaloom requires an explicit existing output folder selected through the portal before Start is enabled. It does not create or assume `~/Videos/Omaloom`. Existing users keep their previously selected folder; if that folder is removed or becomes unsafe, recording remains disabled until another folder is chosen.
+
 ## Recording controls
 
 - **Folder** — choose the local output directory through xdg-desktop-portal.
