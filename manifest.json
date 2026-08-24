@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "coak.omaloom",
   "name": "Omaloom",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "author": "Cause of a Kind",
   "license": "MIT",
   "description": "Local-first screen recording controls for Omarchy Quattro.",

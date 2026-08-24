@@ -4,6 +4,7 @@ import importlib.util
 import json
 import pathlib
 import subprocess
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 HELPER = ROOT / "bin" / "omaloom-folder-picker"
@@ -36,6 +37,16 @@ def test_rejects_nonlocal_uri():
         raise AssertionError("remote file URI should be rejected")
 
 
+def test_missing_default_uses_nearest_existing_parent_without_creation():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        missing = root / "Videos" / "Omaloom"
+        assert module.existing_start_folder(str(missing)) == str(root)
+        assert not missing.exists()
+    assert module.existing_start_folder("relative/path") == ""
+    assert module.existing_start_folder("") == ""
+
+
 def test_decode_uri_cli_outputs_json():
     proc = subprocess.run(
         [str(HELPER), "--decode-uri", "file:///tmp/Omaloom%20Folder"],
@@ -49,5 +60,6 @@ def test_decode_uri_cli_outputs_json():
 if __name__ == "__main__":
     test_local_file_uri_decoding()
     test_rejects_nonlocal_uri()
+    test_missing_default_uses_nearest_existing_parent_without_creation()
     test_decode_uri_cli_outputs_json()
     print("folder picker tests passed")

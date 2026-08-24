@@ -26,7 +26,8 @@ Panel {
   readonly property bool recording: state === "recording"
   readonly property bool busy: selecting || preparing || countdown || starting || recording
   readonly property bool webcamBlocksStart: omaloomSettings.recordWebcam && webcamAvailabilityState !== "ready"
-  readonly property bool canStart: !startDelay.running && !actionProcess.running && !busy && !webcamBlocksStart
+  readonly property bool canConfigure: !startDelay.running && !actionProcess.running && !busy
+  readonly property bool canStart: canConfigure && !webcamBlocksStart
   readonly property bool setupResourcesActive: root.opened && !root.busy
   readonly property bool previewActive: setupResourcesActive && omaloomSettings.recordWebcam && mediaDevices.videoInputs.length > 0
   readonly property color contentForeground: bar ? bar.foreground : Color.foreground
@@ -132,7 +133,7 @@ Panel {
   }
 
   function openFolderPicker() {
-    if (folderPickerProcess.running || !canStart) return
+    if (folderPickerProcess.running || !canConfigure) return
     // The external portal window takes focus, so KeyboardPanel dismisses the
     // setup popup. Restore it after selection/cancellation to keep the user in
     // the same setup flow.
@@ -1036,7 +1037,7 @@ Panel {
       width: parent.width
       label: "Folder"
       value: omaloomSettings.outputDirectory
-      enabled: root.canStart
+      enabled: root.canConfigure
       onActivated: root.openFolderPicker()
     }
 
@@ -1044,7 +1045,7 @@ Panel {
       width: parent.width
       label: "Current monitor / fullscreen"
       checked: omaloomSettings.recordFullscreen
-      enabled: root.canStart
+      enabled: root.canConfigure
       onToggled: function(checked) { omaloomSettings.recordFullscreen = checked }
     }
 
@@ -1052,7 +1053,7 @@ Panel {
       width: parent.width
       label: "System audio"
       checked: omaloomSettings.recordSystemAudio
-      enabled: root.canStart
+      enabled: root.canConfigure
       onToggled: function(checked) { omaloomSettings.recordSystemAudio = checked }
     }
 
@@ -1060,7 +1061,7 @@ Panel {
       width: parent.width
       label: "Microphone"
       checked: omaloomSettings.recordMicrophone
-      enabled: root.canStart
+      enabled: root.canConfigure
       onToggled: function(checked) { omaloomSettings.recordMicrophone = checked }
     }
 
@@ -1070,7 +1071,7 @@ Panel {
       width: parent.width
       label: "Mic input"
       value: root.microphoneDevices.length === 0 ? "No microphones found" : root.deviceLabel(root.microphoneDevices, omaloomSettings.microphoneDevice || "default_input", "Default microphone")
-      enabled: root.canStart && root.microphoneDevices.length > 0
+      enabled: root.canConfigure && root.microphoneDevices.length > 0
       onActivated: root.microphoneListOpen = !root.microphoneListOpen
     }
 
@@ -1080,7 +1081,7 @@ Panel {
         width: recordColumn.width
         label: modelData.label || modelData.id
         selected: (omaloomSettings.microphoneDevice || "default_input") === modelData.id
-        enabled: root.canStart
+        enabled: root.canConfigure
         onActivated: {
           omaloomSettings.microphoneDevice = modelData.id
           root.microphoneListOpen = false
@@ -1092,7 +1093,7 @@ Panel {
       width: parent.width
       label: "Webcam overlay"
       checked: omaloomSettings.recordWebcam
-      enabled: root.canStart
+      enabled: root.canConfigure
       onToggled: function(checked) { omaloomSettings.recordWebcam = checked }
     }
 
@@ -1102,7 +1103,7 @@ Panel {
       width: parent.width
       label: "Camera"
       value: root.webcamDevices.length === 0 ? "No cameras found" : root.deviceLabel(root.webcamDevices, omaloomSettings.webcamDevice, "Default camera")
-      enabled: root.canStart && root.webcamDevices.length > 0
+      enabled: root.canConfigure && root.webcamDevices.length > 0
       onActivated: root.webcamListOpen = !root.webcamListOpen
     }
 
@@ -1112,7 +1113,7 @@ Panel {
         width: recordColumn.width
         label: modelData.label || modelData.id
         selected: omaloomSettings.webcamDevice === modelData.id
-        enabled: root.canStart
+        enabled: root.canConfigure
         onActivated: {
           omaloomSettings.webcamDevice = modelData.id
           root.webcamListOpen = false
@@ -1126,7 +1127,7 @@ Panel {
       width: parent.width
       label: "Position"
       value: root.optionLabel(omaloomSettings.webcamPosition)
-      enabled: root.canStart
+      enabled: root.canConfigure
       onActivated: root.cycleWebcamPosition()
     }
 
@@ -1136,7 +1137,7 @@ Panel {
       width: parent.width
       label: "Size"
       value: root.optionLabel(omaloomSettings.webcamSize)
-      enabled: root.canStart
+      enabled: root.canConfigure
       onActivated: root.cycleWebcamSize()
     }
 

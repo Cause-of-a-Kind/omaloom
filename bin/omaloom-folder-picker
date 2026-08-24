@@ -51,6 +51,19 @@ def emit_path(path: str) -> None:
     print(json.dumps({"path": path}, ensure_ascii=False), flush=True)
 
 
+def existing_start_folder(path: str) -> str:
+    """Return the nearest existing directory without creating user folders."""
+    if not path or not os.path.isabs(path):
+        return ""
+    candidate = os.path.normpath(path)
+    while not os.path.isdir(candidate):
+        parent = os.path.dirname(candidate)
+        if parent == candidate:
+            return ""
+        candidate = parent
+    return candidate
+
+
 def run_portal_picker(title: str, current_folder: str) -> int:
     try:
         import gi  # type: ignore
@@ -79,8 +92,9 @@ def run_portal_picker(title: str, current_folder: str) -> int:
         "directory": GLib.Variant("b", True),
         "modal": GLib.Variant("b", True),
     }
-    if current_folder:
-        options["current_folder"] = GLib.Variant("ay", current_folder.encode() + b"\0")
+    start_folder = existing_start_folder(current_folder)
+    if start_folder:
+        options["current_folder"] = GLib.Variant("ay", os.fsencode(start_folder) + b"\0")
 
     handle_variant = proxy.call_sync(
         "OpenFile",

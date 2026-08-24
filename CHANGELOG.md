@@ -2,6 +2,13 @@
 
 All notable changes to Omaloom are documented here.
 
+## 0.1.5 — 2026-08-23
+
+### Fixed
+
+- Let users change setup options, including Folder and Camera, while recording readiness is blocked by camera availability.
+- Start the portal folder picker at the nearest existing parent when the configured/default recording folder does not exist yet, without creating folders or changing settings implicitly.
+
 ## 0.1.4 — 2026-08-23
 
 ### Performance
